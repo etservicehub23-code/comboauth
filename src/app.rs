@@ -11,7 +11,7 @@ pub struct App {
     pub combo_profiles: Vec<ComboProfile>,
     pub settings: Vec<SettingEntry>,
     pub demo_combo: Option<Combo>,
-    pub recorded_combo_tokens: Vec<&'static str>,
+    pub recorded_combo_tokens: Vec<String>,
     pub test_result: ComboTestResult,
     pub vault_state: VaultState,
 }
@@ -252,17 +252,17 @@ impl App {
             _ => return false,
         };
 
-        self.recorded_combo_tokens.push(token);
+        self.recorded_combo_tokens.push(token.to_owned());
         self.test_result = ComboTestResult::Waiting;
         self.vault_state = VaultState::Locked;
         true
     }
 
-    pub fn record_combo_token(&mut self, token: &'static str) {
+    pub fn record_combo_token(&mut self, token: &str) {
         if self.current_screen != Screen::TestLab {
             return;
         }
-        self.recorded_combo_tokens.push(token);
+        self.recorded_combo_tokens.push(token.to_owned());
         self.test_result = ComboTestResult::Waiting;
         self.vault_state = VaultState::Locked;
     }
@@ -288,7 +288,7 @@ impl App {
             return;
         };
 
-        self.recorded_combo_tokens = profile.sequence.split_whitespace().collect();
+        self.recorded_combo_tokens = profile.sequence.split_whitespace().map(|s| s.to_owned()).collect();
         self.test_result = ComboTestResult::Waiting;
         self.vault_state = VaultState::Locked;
     }
