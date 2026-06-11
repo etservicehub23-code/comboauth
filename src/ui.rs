@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
 use crate::app::{App, ComboTestResult, Screen, VaultState};
+use crate::combo::MatchState;
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
@@ -157,6 +158,26 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
         })
         .unwrap_or_else(|| "No predefined combo selected.".to_string());
 
+    let prefix_line = match app.prefix_match_state() {
+        None => ("".to_string(), Style::default().fg(Color::DarkGray)),
+        Some(MatchState::Partial { matched, remaining }) => (
+            format!("  {matched} step(s) matched, {remaining} remaining..."),
+            Style::default().fg(Color::Yellow),
+        ),
+        Some(MatchState::Full) => (
+            "  All steps matched — press Enter to confirm.".to_string(),
+            Style::default().fg(Color::Green),
+        ),
+        Some(MatchState::Mismatch { at }) => (
+            format!("  Mismatch at step {at}."),
+            Style::default().fg(Color::Red),
+        ),
+        Some(MatchState::TooLong) => (
+            "  Input is longer than the target combo.".to_string(),
+            Style::default().fg(Color::Red),
+        ),
+    };
+
     let result = match &app.test_result {
         ComboTestResult::Waiting => "Waiting for test.".to_string(),
         ComboTestResult::Match(name) => format!("Match: {name}."),
@@ -183,6 +204,7 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(recorded),
+        Line::from(Span::styled(prefix_line.0, prefix_line.1)),
         Line::from(""),
         Line::from(selected),
         Line::from(result),

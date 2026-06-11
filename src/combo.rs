@@ -49,6 +49,19 @@ impl TimedCombo {
     }
 }
 
+/// Describes how a partial combo input aligns against a target combo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchState {
+    /// Input steps are a valid prefix of the target; how many matched and remain.
+    Partial { matched: usize, remaining: usize },
+    /// Input exactly equals the target combo.
+    Full,
+    /// Input diverges from the target at the given zero-based step index.
+    Mismatch { at: usize },
+    /// Input is longer than the target combo.
+    TooLong,
+}
+
 impl Combo {
     pub fn parse(input: &str) -> Option<Self> {
         let steps: Option<Vec<ComboStep>> = input.split_whitespace().map(parse_step).collect();
@@ -66,9 +79,35 @@ impl Combo {
         self.steps.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty()
     }
+
+    pub fn match_prefix(&self, partial: &Combo) -> MatchState {
+        let target = &self.steps;
+        let input = &partial.steps;
+
+        if input.len() > target.len() {
+            return MatchState::TooLong;
+        }
+
+        for (i, (t, p)) in target.iter().zip(input.iter()).enumerate() {
+            if t != p {
+                return MatchState::Mismatch { at: i };
+            }
+        }
+
+        if input.len() == target.len() {
+            MatchState::Full
+        } else {
+            MatchState::Partial {
+                matched: input.len(),
+                remaining: target.len() - input.len(),
+            }
+        }
+    }
+
 }
 
 fn parse_step(token: &str) -> Option<ComboStep> {
@@ -94,7 +133,7 @@ fn parse_step(token: &str) -> Option<ComboStep> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Combo, ComboStep, Direction, TimedCombo, TimingWindow};
+    use super::{Combo, ComboStep, Direction, MatchState, TimedCombo, TimingWindow};
 
     // --- valid combos ---
 
@@ -258,5 +297,58 @@ mod tests {
         let lower = Combo::parse("a").expect("valid");
         let upper = Combo::parse("A").expect("valid");
         assert_eq!(lower, upper);
+    }
+
+    // --- prefix matching ---
+
+    #[test]
+    fn prefix_match_empty_partial_is_partial_all_remaining() {
+        // Empty input can't be parsed, so this tests via len=0 edge:
+        // match_prefix is only called with a non-empty partial from App,
+        // but the TooLong / Full / Mismatch / Partial paths need direct coverage.
+        let target = Combo::parse("down right A").expect("valid");
+        let partial = Combo::parse("down").expect("valid");
+        assert_eq!(
+            target.match_prefix(&partial),
+            MatchState::Partial { matched: 1, remaining: 2 }
+        );
+    }
+
+    #[test]
+    fn prefix_match_full_returns_full() {
+        let target = Combo::parse("down right A").expect("valid");
+        let full = Combo::parse("down right A").expect("valid");
+        assert_eq!(target.match_prefix(&full), MatchState::Full);
+    }
+
+    #[test]
+    fn prefix_match_mismatch_at_first_step() {
+        let target = Combo::parse("down right A").expect("valid");
+        let wrong = Combo::parse("up").expect("valid");
+        assert_eq!(target.match_prefix(&wrong), MatchState::Mismatch { at: 0 });
+    }
+
+    #[test]
+    fn prefix_match_mismatch_at_middle_step() {
+        let target = Combo::parse("down right A").expect("valid");
+        let wrong = Combo::parse("down left").expect("valid");
+        assert_eq!(target.match_prefix(&wrong), MatchState::Mismatch { at: 1 });
+    }
+
+    #[test]
+    fn prefix_match_too_long() {
+        let target = Combo::parse("down right A").expect("valid");
+        let long = Combo::parse("down right A B").expect("valid");
+        assert_eq!(target.match_prefix(&long), MatchState::TooLong);
+    }
+
+    #[test]
+    fn prefix_match_two_of_three_steps() {
+        let target = Combo::parse("down right A").expect("valid");
+        let partial = Combo::parse("down right").expect("valid");
+        assert_eq!(
+            target.match_prefix(&partial),
+            MatchState::Partial { matched: 2, remaining: 1 }
+        );
     }
 }

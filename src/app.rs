@@ -1,4 +1,4 @@
-use crate::combo::{Combo, TimedCombo};
+use crate::combo::{Combo, MatchState, TimedCombo};
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -196,7 +196,7 @@ impl App {
             Screen::Services => Screen::Settings,
             Screen::Combos => Screen::Services,
             Screen::TestLab => Screen::Combos,
-            Screen::Settings => Screen::Combos,
+            Screen::Settings => Screen::TestLab,
             Screen::Quit => Screen::Home,
         };
         self.selected_detail_item = 0;
@@ -333,6 +333,16 @@ impl App {
         let profile = self.selected_combo_profile()?;
         let combo = Combo::parse(profile.sequence)?;
         Some(TimedCombo::new(combo, profile.timing_window_ms))
+    }
+
+    pub fn prefix_match_state(&self) -> Option<MatchState> {
+        if self.recorded_combo_tokens.is_empty() {
+            return None;
+        }
+        let profile = self.selected_combo_profile()?;
+        let target = Combo::parse(profile.sequence)?;
+        let partial = Combo::parse(&self.recorded_combo_input())?;
+        Some(target.match_prefix(&partial))
     }
 
     fn unlock_vault_for_sequence(&self, sequence: &str) -> VaultState {
