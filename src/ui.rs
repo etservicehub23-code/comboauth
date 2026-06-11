@@ -133,7 +133,7 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
 
     let predefined_list = List::new(predefined).block(
         Block::default()
-            .title("Predefined combos")
+            .title("Predefined combos  [Tab to cycle]")
             .borders(Borders::ALL),
     );
     frame.render_widget(predefined_list, chunks[0]);
@@ -189,8 +189,8 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
         Line::from(""),
         Line::from(Span::styled(vault_label, vault_style)),
         Line::from(""),
-        Line::from("Record: u/d/l/r/a/b/x/y  diagonals: 7=UL 9=UR 1=DL 3=DR"),
-        Line::from("Enter: test | p: load predefined | c: clear | Backspace: undo"),
+        Line::from("Arrows/u/d/l/r/a/b/x/y  diagonals: 7=UL 9=UR 1=DL 3=DR"),
+        Line::from("Enter: test | Tab: cycle predefined | p: load | c: clear | Bksp: undo | Esc: exit"),
     ])
     .block(
         Block::default()

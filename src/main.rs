@@ -64,8 +64,11 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                     KeyCode::Down => app.next_item(),
                     KeyCode::Left => app.previous_screen(),
                     KeyCode::Right => app.next_screen(),
+                    KeyCode::Tab if app.is_test_lab() => app.next_item(),
+                    KeyCode::BackTab if app.is_test_lab() => app.previous_item(),
                     KeyCode::Enter if app.is_test_lab() => app.test_recorded_combo(),
                     KeyCode::Enter => app.activate_selected(),
+                    _ if app.is_test_lab() => {}
                     _ => {}
                 }
             }
