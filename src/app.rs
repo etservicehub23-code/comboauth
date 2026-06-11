@@ -258,6 +258,15 @@ impl App {
         true
     }
 
+    pub fn record_combo_token(&mut self, token: &'static str) {
+        if self.current_screen != Screen::TestLab {
+            return;
+        }
+        self.recorded_combo_tokens.push(token);
+        self.test_result = ComboTestResult::Waiting;
+        self.vault_state = VaultState::Locked;
+    }
+
     pub fn pop_recorded_combo_token(&mut self) {
         if self.current_screen == Screen::TestLab {
             self.recorded_combo_tokens.pop();
