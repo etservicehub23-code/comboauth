@@ -244,6 +244,11 @@ impl App {
             'b' => "B",
             'x' => "X",
             'y' => "Y",
+            // Numpad-style diagonal shortcuts (7/9/1/3 match numpad corners)
+            '7' => "up-left",
+            '9' => "up-right",
+            '1' => "down-left",
+            '3' => "down-right",
             _ => return false,
         };
 
@@ -490,6 +495,47 @@ mod tests {
         let tc = app.selected_timed_combo().expect("second profile present");
         assert_eq!(tc.timing.window_ms, 400);
         assert_eq!(tc.combo.len(), 3);
+    }
+
+    #[test]
+    fn records_diagonal_shortcut_tokens() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+
+        assert!(app.record_combo_shortcut('7'));
+        assert!(app.record_combo_shortcut('9'));
+        assert!(app.record_combo_shortcut('1'));
+        assert!(app.record_combo_shortcut('3'));
+        assert_eq!(
+            app.recorded_combo_input(),
+            "up-left up-right down-left down-right"
+        );
+    }
+
+    #[test]
+    fn diagonal_shortcut_parses_as_valid_combo() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+
+        assert!(app.record_combo_shortcut('d'));
+        assert!(app.record_combo_shortcut('3'));
+        assert!(app.record_combo_shortcut('a'));
+
+        // "down down-right A" must parse successfully (not InvalidInput)
+        // We can verify by checking the recorded input parses
+        use crate::combo::Combo;
+        let parsed = Combo::parse(&app.recorded_combo_input());
+        assert!(parsed.is_some(), "diagonal combo should parse");
+        assert_eq!(parsed.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn unknown_shortcut_key_is_rejected() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+
+        assert!(!app.record_combo_shortcut('z'));
+        assert_eq!(app.recorded_combo_input(), "");
     }
 
     #[test]

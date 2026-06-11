@@ -189,7 +189,7 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
         Line::from(""),
         Line::from(Span::styled(vault_label, vault_style)),
         Line::from(""),
-        Line::from("Record: u/d/l/r/a/b/x/y"),
+        Line::from("Record: u/d/l/r/a/b/x/y  diagonals: 7=UL 9=UR 1=DL 3=DR"),
         Line::from("Enter: test | p: load predefined | c: clear | Backspace: undo"),
     ])
     .block(
