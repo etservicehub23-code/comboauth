@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Combo {
     steps: Vec<ComboStep>,
@@ -60,6 +62,43 @@ pub enum MatchState {
     Mismatch { at: usize },
     /// Input is longer than the target combo.
     TooLong,
+}
+
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Direction::Up        => f.write_str("up"),
+            Direction::Down      => f.write_str("down"),
+            Direction::Left      => f.write_str("left"),
+            Direction::Right     => f.write_str("right"),
+            Direction::UpRight   => f.write_str("up-right"),
+            Direction::DownRight => f.write_str("down-right"),
+            Direction::DownLeft  => f.write_str("down-left"),
+            Direction::UpLeft    => f.write_str("up-left"),
+        }
+    }
+}
+
+impl fmt::Display for ComboStep {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ComboStep::Direction(d) => write!(f, "{d}"),
+            ComboStep::Button(b)    => f.write_str(b),
+        }
+    }
+}
+
+impl fmt::Display for Combo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut iter = self.steps.iter();
+        if let Some(first) = iter.next() {
+            write!(f, "{first}")?;
+            for step in iter {
+                write!(f, " {step}")?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Combo {
@@ -350,5 +389,57 @@ mod tests {
             target.match_prefix(&partial),
             MatchState::Partial { matched: 2, remaining: 1 }
         );
+    }
+
+    // --- Display / round-trip ---
+
+    #[test]
+    fn direction_display_produces_canonical_token() {
+        assert_eq!(Direction::Up.to_string(),        "up");
+        assert_eq!(Direction::Down.to_string(),      "down");
+        assert_eq!(Direction::Left.to_string(),      "left");
+        assert_eq!(Direction::Right.to_string(),     "right");
+        assert_eq!(Direction::UpRight.to_string(),   "up-right");
+        assert_eq!(Direction::DownRight.to_string(), "down-right");
+        assert_eq!(Direction::DownLeft.to_string(),  "down-left");
+        assert_eq!(Direction::UpLeft.to_string(),    "up-left");
+    }
+
+    #[test]
+    fn combo_step_display_matches_direction_and_button() {
+        assert_eq!(ComboStep::Direction(Direction::Down).to_string(), "down");
+        assert_eq!(ComboStep::Button("A".into()).to_string(), "A");
+        assert_eq!(ComboStep::Button("L1".into()).to_string(), "L1");
+    }
+
+    #[test]
+    fn combo_display_joins_steps_with_spaces() {
+        let combo = Combo::parse("down right A").expect("valid");
+        assert_eq!(combo.to_string(), "down right A");
+    }
+
+    #[test]
+    fn combo_display_round_trips_through_parse() {
+        let sequences = [
+            "down right A",
+            "up-left down-right B",
+            "left right L1 R2",
+            "up down X Y",
+            "down-right A",
+        ];
+        for seq in sequences {
+            let combo = Combo::parse(seq).unwrap_or_else(|| panic!("parse failed: {seq}"));
+            let displayed = combo.to_string();
+            let re_parsed = Combo::parse(&displayed)
+                .unwrap_or_else(|| panic!("re-parse failed for displayed: {displayed}"));
+            assert_eq!(combo, re_parsed, "round-trip failed for: {seq}");
+        }
+    }
+
+    #[test]
+    fn combo_display_normalizes_aliases_to_canonical() {
+        // "dr" is an alias; Display should emit the canonical "down-right"
+        let combo = Combo::parse("down dr A").expect("valid");
+        assert_eq!(combo.to_string(), "down down-right A");
     }
 }
