@@ -1,4 +1,4 @@
-use crate::combo::Combo;
+use crate::combo::{Combo, TimedCombo};
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -39,6 +39,7 @@ pub struct ComboProfile {
     pub name: &'static str,
     pub sequence: &'static str,
     pub status: &'static str,
+    pub timing_window_ms: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,16 +117,19 @@ impl Default for App {
                     name: "Quarter Turn",
                     sequence: "down right A",
                     status: "parsed",
+                    timing_window_ms: 300,
                 },
                 ComboProfile {
                     name: "Dash Confirm",
                     sequence: "left right B",
                     status: "mock",
+                    timing_window_ms: 400,
                 },
                 ComboProfile {
                     name: "Focus Reset",
                     sequence: "up down X",
                     status: "mock",
+                    timing_window_ms: 500,
                 },
             ],
             settings: vec![
@@ -311,6 +315,12 @@ impl App {
         self.combo_profiles.get(self.selected_detail_item)
     }
 
+    pub fn selected_timed_combo(&self) -> Option<TimedCombo> {
+        let profile = self.selected_combo_profile()?;
+        let combo = Combo::parse(profile.sequence)?;
+        Some(TimedCombo::new(combo, profile.timing_window_ms))
+    }
+
     fn unlock_vault_for_sequence(&self, sequence: &str) -> VaultState {
         for service in &self.services {
             if service.combo_hint == sequence {
@@ -460,6 +470,26 @@ mod tests {
 
         app.clear_recorded_combo();
         assert_eq!(app.vault_state, VaultState::Locked);
+    }
+
+    #[test]
+    fn selected_timed_combo_returns_profile_combo_and_timing() {
+        let app = App::default();
+
+        let tc = app.selected_timed_combo().expect("first profile present");
+        assert_eq!(tc.timing.window_ms, 300);
+        assert_eq!(tc.combo.len(), 3);
+    }
+
+    #[test]
+    fn selected_timed_combo_updates_with_selection() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.selected_detail_item = 1;
+
+        let tc = app.selected_timed_combo().expect("second profile present");
+        assert_eq!(tc.timing.window_ms, 400);
+        assert_eq!(tc.combo.len(), 3);
     }
 
     #[test]

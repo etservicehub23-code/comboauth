@@ -146,8 +146,15 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
     };
 
     let selected = app
-        .selected_combo_profile()
-        .map(|combo| format!("{} expects {}", combo.name, combo.sequence))
+        .selected_timed_combo()
+        .map(|tc| {
+            format!(
+                "{} | {} steps | window: {} ms",
+                app.selected_combo_profile().map(|p| p.name).unwrap_or(""),
+                tc.combo.len(),
+                tc.timing.window_ms,
+            )
+        })
         .unwrap_or_else(|| "No predefined combo selected.".to_string());
 
     let result = match &app.test_result {
