@@ -47,9 +47,21 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
         if event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => app.quit(),
+                    KeyCode::Char('q') => app.quit(),
+                    KeyCode::Char('c') if app.is_test_lab() => app.clear_recorded_combo(),
+                    KeyCode::Char('p') if app.is_test_lab() => app.load_selected_test_combo(),
+                    KeyCode::Char(value) if app.is_test_lab() => {
+                        app.record_combo_shortcut(value);
+                    }
+                    KeyCode::Esc => app.go_home(),
+                    KeyCode::Backspace if app.is_test_lab() => app.pop_recorded_combo_token(),
+                    KeyCode::Backspace => app.go_home(),
                     KeyCode::Up => app.previous_item(),
                     KeyCode::Down => app.next_item(),
+                    KeyCode::Left => app.previous_screen(),
+                    KeyCode::Right => app.next_screen(),
+                    KeyCode::Enter if app.is_test_lab() => app.test_recorded_combo(),
+                    KeyCode::Enter => app.activate_selected(),
                     _ => {}
                 }
             }
