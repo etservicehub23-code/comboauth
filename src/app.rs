@@ -174,11 +174,13 @@ impl App {
     }
 
     pub fn go_home(&mut self) {
+        self.lock_vault_on_exit();
         self.current_screen = Screen::Home;
         self.selected_detail_item = 0;
     }
 
     pub fn next_screen(&mut self) {
+        self.lock_vault_on_exit();
         self.current_screen = match self.current_screen {
             Screen::Home => self.home_items[self.selected_home_item],
             Screen::Services => Screen::Combos,
@@ -191,6 +193,7 @@ impl App {
     }
 
     pub fn previous_screen(&mut self) {
+        self.lock_vault_on_exit();
         self.current_screen = match self.current_screen {
             Screen::Home => self.home_items[self.selected_home_item],
             Screen::Services => Screen::Settings,
@@ -343,6 +346,11 @@ impl App {
         let target = Combo::parse(profile.sequence)?;
         let partial = Combo::parse(&self.recorded_combo_input())?;
         Some(target.match_prefix(&partial))
+    }
+
+    fn lock_vault_on_exit(&mut self) {
+        self.vault_state = VaultState::Locked;
+        self.test_result = ComboTestResult::Waiting;
     }
 
     fn unlock_vault_for_sequence(&self, sequence: &str) -> VaultState {
@@ -576,4 +584,52 @@ mod tests {
             }
         );
     }
+    #[test]
+    fn vault_locks_when_navigating_home() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+        assert!(matches!(app.vault_state, VaultState::Unlocked { .. }));
+
+        app.go_home();
+
+        assert_eq!(app.vault_state, VaultState::Locked);
+        assert_eq!(app.test_result, ComboTestResult::Waiting);
+    }
+
+    #[test]
+    fn vault_locks_when_cycling_next_screen() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+        assert!(matches!(app.vault_state, VaultState::Unlocked { .. }));
+
+        app.next_screen();
+
+        assert_eq!(app.vault_state, VaultState::Locked);
+        assert_eq!(app.test_result, ComboTestResult::Waiting);
+    }
+
+    #[test]
+    fn vault_locks_when_cycling_previous_screen() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+        assert!(matches!(app.vault_state, VaultState::Unlocked { .. }));
+
+        app.previous_screen();
+
+        assert_eq!(app.vault_state, VaultState::Locked);
+        assert_eq!(app.test_result, ComboTestResult::Waiting);
+    }
+
 }
