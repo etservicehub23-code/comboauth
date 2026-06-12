@@ -58,9 +58,21 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                         app.confirm_name_entry();
                     }
                     KeyCode::Esc if app.is_record_combo() => app.cancel_record_combo(),
+                    // RecordCombo TokenCapture — arrow keys record directions (must come before cancel handler)
+                    KeyCode::Up if app.is_record_combo_token_capture() => {
+                        app.record_combo_token("up");
+                    }
+                    KeyCode::Down if app.is_record_combo_token_capture() => {
+                        app.record_combo_token("down");
+                    }
+                    KeyCode::Left if app.is_record_combo_token_capture() => {
+                        app.record_combo_token("left");
+                    }
+                    KeyCode::Right if app.is_record_combo_token_capture() => {
+                        app.record_combo_token("right");
+                    }
                     KeyCode::Left if app.is_record_combo() => app.cancel_record_combo(),
                     KeyCode::Right if app.is_record_combo() => app.cancel_record_combo(),
-                    // RecordCombo TokenCapture
                     KeyCode::Char('c') if app.is_record_combo_token_capture() => {
                         app.clear_recorded_combo();
                     }
@@ -69,12 +81,6 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                     }
                     KeyCode::Backspace if app.is_record_combo_token_capture() => {
                         app.pop_recorded_combo_token();
-                    }
-                    KeyCode::Up if app.is_record_combo_token_capture() => {
-                        app.record_combo_token("up");
-                    }
-                    KeyCode::Down if app.is_record_combo_token_capture() => {
-                        app.record_combo_token("down");
                     }
                     KeyCode::Enter if app.is_record_combo_token_capture() => {
                         app.save_recorded_combo();
