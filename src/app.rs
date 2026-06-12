@@ -322,6 +322,7 @@ impl App {
             self.test_result = ComboTestResult::NoMatch;
             self.vault_state = VaultState::Locked;
         }
+        self.recorded_combo_tokens.clear();
     }
 
     pub fn recorded_combo_input(&self) -> String {
@@ -431,7 +432,7 @@ mod tests {
         assert!(app.record_combo_shortcut('a'));
         app.test_recorded_combo();
 
-        assert_eq!(app.recorded_combo_input(), "down right A");
+        assert_eq!(app.recorded_combo_input(), "");
         assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn"));
     }
 
