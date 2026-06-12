@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::combo::{Combo, MatchState, TimedCombo};
+use crate::combo::Combo;
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -326,58 +326,54 @@ impl App {
         }
     }
 
-    pub fn load_selected_test_combo(&mut self) {
-        let Some(profile) = self.selected_combo_profile() else {
-            return;
-        };
-
-        self.recorded_combo_tokens = profile.sequence.split_whitespace().map(|s| s.to_owned()).collect();
-        self.recorded_timestamps.clear();
-        self.test_result = ComboTestResult::Waiting;
-        self.vault_state = VaultState::Locked;
-    }
-
     pub fn test_recorded_combo(&mut self) {
-        let (profile_name, profile_sequence, profile_gaps) = match self.selected_combo_profile() {
-            Some(p) => (p.name.to_owned(), p.sequence.to_owned(), p.gaps_ms.clone()),
-            None => {
-                self.test_result = ComboTestResult::InvalidInput;
-                return;
-            }
-        };
-
         let Some(recorded) = Combo::parse(&self.recorded_combo_input()) else {
+            self.recorded_combo_tokens.clear();
+            self.recorded_timestamps.clear();
             self.test_result = ComboTestResult::InvalidInput;
             return;
         };
 
-        let Some(expected) = Combo::parse(&profile_sequence) else {
-            self.test_result = ComboTestResult::InvalidInput;
-            return;
-        };
+        let test_gaps = self.recorded_gaps_ms();
 
-        if recorded == expected {
-            let timing_ok = if profile_gaps.is_empty() {
+        // Blind match: find the first profile whose sequence (and timing, if set) matches.
+        let matched = self.combo_profiles.iter().find_map(|profile| {
+            let expected = Combo::parse(&profile.sequence)?;
+            if recorded != expected {
+                return None;
+            }
+            let timing_ok = if profile.gaps_ms.is_empty() {
                 true
             } else {
-                let test_gaps = self.recorded_gaps_ms();
-                gaps_pass_tolerance(&test_gaps, &profile_gaps, self.timing_tolerance_pct)
+                gaps_pass_tolerance(&test_gaps, &profile.gaps_ms, self.timing_tolerance_pct)
             };
-
             if timing_ok {
-                self.test_result = ComboTestResult::Match(profile_name);
-                self.vault_state = self.unlock_vault_for_sequence(&profile_sequence);
+                Some((profile.name.clone(), profile.sequence.clone()))
             } else {
-                self.test_result = ComboTestResult::TimingMismatch;
-                self.vault_state = VaultState::Locked;
+                None
             }
+        });
+
+        // Detect sequence-only match (timing mismatch) before clearing tokens.
+        let sequence_matched_any = matched.is_none()
+            && self
+                .combo_profiles
+                .iter()
+                .any(|p| Combo::parse(&p.sequence).map(|e| recorded == e).unwrap_or(false));
+
+        self.recorded_combo_tokens.clear();
+        self.recorded_timestamps.clear();
+
+        if let Some((name, sequence)) = matched {
+            self.vault_state = self.unlock_vault_for_sequence(&sequence);
+            self.test_result = ComboTestResult::Match(name);
+        } else if sequence_matched_any {
+            self.test_result = ComboTestResult::TimingMismatch;
+            self.vault_state = VaultState::Locked;
         } else {
             self.test_result = ComboTestResult::NoMatch;
             self.vault_state = VaultState::Locked;
         }
-
-        self.recorded_combo_tokens.clear();
-        self.recorded_timestamps.clear();
     }
 
     pub fn recorded_combo_input(&self) -> String {
@@ -391,26 +387,6 @@ impl App {
             .windows(2)
             .map(|w| w[1].duration_since(w[0]).as_millis() as u64)
             .collect()
-    }
-
-    pub fn selected_combo_profile(&self) -> Option<&ComboProfile> {
-        self.combo_profiles.get(self.selected_detail_item)
-    }
-
-    pub fn selected_timed_combo(&self) -> Option<TimedCombo> {
-        let profile = self.selected_combo_profile()?;
-        let combo = Combo::parse(&profile.sequence)?;
-        Some(TimedCombo::new(combo, profile.timing_window_ms))
-    }
-
-    pub fn prefix_match_state(&self) -> Option<MatchState> {
-        if self.recorded_combo_tokens.is_empty() {
-            return None;
-        }
-        let profile = self.selected_combo_profile()?;
-        let target = Combo::parse(&profile.sequence)?;
-        let partial = Combo::parse(&self.recorded_combo_input())?;
-        Some(target.match_prefix(&partial))
     }
 
     pub fn is_record_combo(&self) -> bool {
@@ -550,7 +526,7 @@ impl App {
             Screen::Home => self.home_items.len(),
             Screen::Services => self.services.len(),
             Screen::Combos => self.combo_profiles.len(),
-            Screen::TestLab => self.combo_profiles.len(),
+            Screen::TestLab => 0,
             Screen::Settings => self.settings.len(),
             Screen::RecordCombo | Screen::Quit => 0,
         }
@@ -639,17 +615,6 @@ mod tests {
     }
 
     #[test]
-    fn can_load_selected_predefined_combo() {
-        let mut app = App::default();
-        app.current_screen = Screen::TestLab;
-        app.selected_detail_item = 1;
-
-        app.load_selected_test_combo();
-
-        assert_eq!(app.recorded_combo_input(), "left right B");
-    }
-
-    #[test]
     fn correct_combo_unlocks_matching_service_vault() {
         let mut app = App::default();
         app.current_screen = Screen::TestLab;
@@ -696,26 +661,6 @@ mod tests {
     }
 
     #[test]
-    fn selected_timed_combo_returns_profile_combo_and_timing() {
-        let app = App::default();
-
-        let tc = app.selected_timed_combo().expect("first profile present");
-        assert_eq!(tc.timing.window_ms, 300);
-        assert_eq!(tc.combo.len(), 3);
-    }
-
-    #[test]
-    fn selected_timed_combo_updates_with_selection() {
-        let mut app = App::default();
-        app.current_screen = Screen::TestLab;
-        app.selected_detail_item = 1;
-
-        let tc = app.selected_timed_combo().expect("second profile present");
-        assert_eq!(tc.timing.window_ms, 400);
-        assert_eq!(tc.combo.len(), 3);
-    }
-
-    #[test]
     fn records_diagonal_shortcut_tokens() {
         let mut app = App::default();
         app.current_screen = Screen::TestLab;
@@ -758,7 +703,6 @@ mod tests {
     fn second_service_combo_unlocks_correct_vault_entry() {
         let mut app = App::default();
         app.current_screen = Screen::TestLab;
-        app.selected_detail_item = 1;
 
         assert!(app.record_combo_shortcut('l'));
         assert!(app.record_combo_shortcut('r'));
@@ -870,17 +814,6 @@ mod tests {
         app.record_combo_shortcut('r');
         app.record_combo_shortcut('a');
         app.test_recorded_combo();
-
-        assert!(app.recorded_timestamps.is_empty());
-    }
-
-    #[test]
-    fn load_selected_clears_timestamps() {
-        let mut app = App::default();
-        app.current_screen = Screen::TestLab;
-
-        app.record_combo_shortcut('d');
-        app.load_selected_test_combo();
 
         assert!(app.recorded_timestamps.is_empty());
     }

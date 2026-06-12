@@ -5,7 +5,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
 use crate::app::{App, ComboTestResult, Screen, VaultState};
-use crate::combo::MatchState;
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
@@ -115,61 +114,34 @@ fn render_combos(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) 
 }
 
 fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
-        .split(area);
-
-    let predefined: Vec<ListItem> = app
-        .combo_profiles
-        .iter()
-        .enumerate()
-        .map(|(index, combo)| {
-            selectable_item(
-                index,
-                app.selected_detail_item,
-                format!("{} | {}", combo.name, combo.sequence),
-            )
-        })
-        .collect();
-
-    let predefined_list = List::new(predefined).block(
-        Block::default()
-            .title("Predefined combos  [Tab to cycle]")
-            .borders(Borders::ALL),
-    );
-    frame.render_widget(predefined_list, chunks[0]);
-
     let recorded = app.recorded_combo_input();
-    let recorded = if recorded.is_empty() {
-        "(empty)".to_string()
+    let input_span = if recorded.is_empty() {
+        Span::styled("(nothing yet)", Style::default().fg(Color::DarkGray))
     } else {
-        recorded
+        Span::styled(recorded, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
     };
 
-    let selected = app
-        .selected_timed_combo()
-        .map(|tc| {
-            format!(
-                "{} | {} steps | window: {} ms",
-                app.selected_combo_profile().map(|p| p.name.as_str()).unwrap_or(""),
-                tc.combo.len(),
-                tc.timing.window_ms,
-            )
-        })
-        .unwrap_or_else(|| "No predefined combo selected.".to_string());
-
-    let progress = combo_progress_line(
-        app.selected_combo_profile().map(|p| p.sequence.as_str()),
-        app.prefix_match_state(),
-    );
-
-    let result = match &app.test_result {
-        ComboTestResult::Waiting => "Waiting for test.".to_string(),
-        ComboTestResult::Match(name) => format!("Match: {name}."),
-        ComboTestResult::NoMatch => "No match.".to_string(),
-        ComboTestResult::InvalidInput => "Invalid or empty combo.".to_string(),
-        ComboTestResult::TimingMismatch => "Timing mismatch — rhythm off.".to_string(),
+    let result_line = match &app.test_result {
+        ComboTestResult::Waiting => Line::from(Span::styled(
+            "Enter your combo, then press Enter.",
+            Style::default().fg(Color::DarkGray),
+        )),
+        ComboTestResult::Match(name) => Line::from(Span::styled(
+            format!("Unlocked: {name}"),
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        )),
+        ComboTestResult::NoMatch => Line::from(Span::styled(
+            "No match — unrecognised combo.",
+            Style::default().fg(Color::Red),
+        )),
+        ComboTestResult::InvalidInput => Line::from(Span::styled(
+            "Nothing to test — enter some keys first.",
+            Style::default().fg(Color::Red),
+        )),
+        ComboTestResult::TimingMismatch => Line::from(Span::styled(
+            "Sequence matched but rhythm was off.",
+            Style::default().fg(Color::Yellow),
+        )),
     };
 
     let (vault_label, vault_style) = match &app.vault_state {
@@ -184,29 +156,30 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
     };
 
     let detail = Paragraph::new(vec![
-        Line::from(Span::styled(
-            "Recording",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(recorded),
-        progress,
+        Line::from("Enter the combo you remember from muscle memory."),
+        Line::from("On Enter, the system will check it against all saved combos."),
         Line::from(""),
-        Line::from(selected),
-        Line::from(result),
+        Line::from(vec![Span::raw("Input: "), input_span]),
+        Line::from(""),
+        result_line,
         Line::from(""),
         Line::from(Span::styled(vault_label, vault_style)),
         Line::from(""),
-        Line::from("Arrows/u/d/l/r/a/b/x/y  diagonals: 7=UL 9=UR 1=DL 3=DR"),
-        Line::from("Enter: test | Tab: cycle predefined | p: load | c: clear | Bksp: undo | Esc: exit"),
+        Line::from(Span::styled(
+            "Arrows / u d l r a b x y  diagonals: 7=UL 9=UR 1=DL 3=DR",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "Enter: test  |  Backspace: undo  |  c: clear  |  Esc: exit",
+            Style::default().fg(Color::DarkGray),
+        )),
     ])
     .block(
         Block::default()
-            .title("Test Lab - mock only")
+            .title("Test Lab — blind combo entry")
             .borders(Borders::ALL),
     );
-    frame.render_widget(detail, chunks[1]);
+    frame.render_widget(detail, area);
 }
 
 fn render_settings(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
@@ -337,62 +310,4 @@ fn selectable_item(
         format!("{prefix}{}", label.into()),
         style,
     )))
-}
-
-fn combo_progress_line(profile_seq: Option<&str>, state: Option<MatchState>) -> Line<'static> {
-    let seq = match profile_seq {
-        Some(s) if !s.is_empty() => s,
-        _ => {
-            return Line::from(Span::styled(
-                "  No combo selected.",
-                Style::default().fg(Color::DarkGray),
-            ))
-        }
-    };
-
-    let steps: Vec<String> = seq.split_whitespace().map(|s| s.to_owned()).collect();
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(steps.len() * 2);
-
-    for (i, step) in steps.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::raw(" "));
-        }
-        let style = match &state {
-            None => Style::default().fg(Color::DarkGray),
-            Some(MatchState::Full) => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-            Some(MatchState::TooLong) => Style::default().fg(Color::Red),
-            Some(MatchState::Partial { matched, .. }) => {
-                if i < *matched {
-                    Style::default().fg(Color::Green)
-                } else if i == *matched {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                }
-            }
-            Some(MatchState::Mismatch { at }) => {
-                if i < *at {
-                    Style::default().fg(Color::Green)
-                } else if i == *at {
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                }
-            }
-        };
-        spans.push(Span::styled(format!("[{step}]"), style));
-    }
-
-    let (suffix, suffix_style): (&'static str, Style) = match &state {
-        None => ("  <- enter combo above", Style::default().fg(Color::DarkGray)),
-        Some(MatchState::Full) => ("  -> press Enter", Style::default().fg(Color::Green)),
-        Some(MatchState::TooLong) => ("  -> too long", Style::default().fg(Color::Red)),
-        Some(MatchState::Mismatch { .. }) => ("  -> wrong step", Style::default().fg(Color::Red)),
-        Some(MatchState::Partial { .. }) => ("", Style::default()),
-    };
-    if !suffix.is_empty() {
-        spans.push(Span::styled(suffix, suffix_style));
-    }
-
-    Line::from(spans)
 }
