@@ -168,6 +168,7 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
         ComboTestResult::Match(name) => format!("Match: {name}."),
         ComboTestResult::NoMatch => "No match.".to_string(),
         ComboTestResult::InvalidInput => "Invalid or empty combo.".to_string(),
+        ComboTestResult::TimingMismatch => "Timing mismatch — rhythm off.".to_string(),
     };
 
     let (vault_label, vault_style) = match &app.vault_state {

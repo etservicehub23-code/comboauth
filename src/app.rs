@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crate::combo::{Combo, MatchState, TimedCombo};
 
 #[derive(Debug, Clone)]
@@ -12,6 +14,8 @@ pub struct App {
     pub settings: Vec<SettingEntry>,
     pub demo_combo: Option<Combo>,
     pub recorded_combo_tokens: Vec<String>,
+    pub recorded_timestamps: Vec<Instant>,
+    pub timing_tolerance_pct: u32,
     pub test_result: ComboTestResult,
     pub vault_state: VaultState,
 }
@@ -40,6 +44,9 @@ pub struct ComboProfile {
     pub sequence: &'static str,
     pub status: &'static str,
     pub timing_window_ms: u32,
+    /// Recorded inter-keypress gaps (ms) from the original recording session.
+    /// Empty means no timing constraint is enforced at test time.
+    pub gaps_ms: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +55,8 @@ pub enum ComboTestResult {
     Match(&'static str),
     NoMatch,
     InvalidInput,
+    /// Sequence matched but inter-keypress timing fell outside the tolerance band.
+    TimingMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,24 +127,27 @@ impl Default for App {
                     sequence: "down right A",
                     status: "parsed",
                     timing_window_ms: 300,
+                    gaps_ms: vec![],
                 },
                 ComboProfile {
                     name: "Dash Confirm",
                     sequence: "left right B",
                     status: "mock",
                     timing_window_ms: 400,
+                    gaps_ms: vec![],
                 },
                 ComboProfile {
                     name: "Focus Reset",
                     sequence: "up down X",
                     status: "mock",
                     timing_window_ms: 500,
+                    gaps_ms: vec![],
                 },
             ],
             settings: vec![
                 SettingEntry {
-                    name: "Timing Window",
-                    value: "300 ms mock",
+                    name: "Timing Tolerance",
+                    value: "40%",
                 },
                 SettingEntry {
                     name: "Theme",
@@ -148,6 +160,8 @@ impl Default for App {
             ],
             demo_combo: Combo::parse("down right A"),
             recorded_combo_tokens: Vec::new(),
+            recorded_timestamps: Vec::new(),
+            timing_tolerance_pct: 40,
             test_result: ComboTestResult::Waiting,
             vault_state: VaultState::Locked,
         }
@@ -256,6 +270,7 @@ impl App {
         };
 
         self.recorded_combo_tokens.push(token.to_owned());
+        self.recorded_timestamps.push(Instant::now());
         self.test_result = ComboTestResult::Waiting;
         self.vault_state = VaultState::Locked;
         true
@@ -266,6 +281,7 @@ impl App {
             return;
         }
         self.recorded_combo_tokens.push(token.to_owned());
+        self.recorded_timestamps.push(Instant::now());
         self.test_result = ComboTestResult::Waiting;
         self.vault_state = VaultState::Locked;
     }
@@ -273,6 +289,7 @@ impl App {
     pub fn pop_recorded_combo_token(&mut self) {
         if self.current_screen == Screen::TestLab {
             self.recorded_combo_tokens.pop();
+            self.recorded_timestamps.pop();
             self.test_result = ComboTestResult::Waiting;
             self.vault_state = VaultState::Locked;
         }
@@ -281,6 +298,7 @@ impl App {
     pub fn clear_recorded_combo(&mut self) {
         if self.current_screen == Screen::TestLab {
             self.recorded_combo_tokens.clear();
+            self.recorded_timestamps.clear();
             self.test_result = ComboTestResult::Waiting;
             self.vault_state = VaultState::Locked;
         }
@@ -292,13 +310,14 @@ impl App {
         };
 
         self.recorded_combo_tokens = profile.sequence.split_whitespace().map(|s| s.to_owned()).collect();
+        self.recorded_timestamps.clear();
         self.test_result = ComboTestResult::Waiting;
         self.vault_state = VaultState::Locked;
     }
 
     pub fn test_recorded_combo(&mut self) {
-        let (profile_name, profile_sequence) = match self.selected_combo_profile() {
-            Some(p) => (p.name, p.sequence),
+        let (profile_name, profile_sequence, profile_gaps) = match self.selected_combo_profile() {
+            Some(p) => (p.name, p.sequence, p.gaps_ms.clone()),
             None => {
                 self.test_result = ComboTestResult::InvalidInput;
                 return;
@@ -316,17 +335,40 @@ impl App {
         };
 
         if recorded == expected {
-            self.test_result = ComboTestResult::Match(profile_name);
-            self.vault_state = self.unlock_vault_for_sequence(profile_sequence);
+            let timing_ok = if profile_gaps.is_empty() {
+                true
+            } else {
+                let test_gaps = self.recorded_gaps_ms();
+                gaps_pass_tolerance(&test_gaps, &profile_gaps, self.timing_tolerance_pct)
+            };
+
+            if timing_ok {
+                self.test_result = ComboTestResult::Match(profile_name);
+                self.vault_state = self.unlock_vault_for_sequence(profile_sequence);
+            } else {
+                self.test_result = ComboTestResult::TimingMismatch;
+                self.vault_state = VaultState::Locked;
+            }
         } else {
             self.test_result = ComboTestResult::NoMatch;
             self.vault_state = VaultState::Locked;
         }
+
         self.recorded_combo_tokens.clear();
+        self.recorded_timestamps.clear();
     }
 
     pub fn recorded_combo_input(&self) -> String {
         self.recorded_combo_tokens.join(" ")
+    }
+
+    /// Compute inter-keypress gaps in milliseconds from the recorded timestamps.
+    /// Returns an empty vec if fewer than two timestamps are present.
+    pub fn recorded_gaps_ms(&self) -> Vec<u64> {
+        self.recorded_timestamps
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]).as_millis() as u64)
+            .collect()
     }
 
     pub fn selected_combo_profile(&self) -> Option<&ComboProfile> {
@@ -386,9 +428,28 @@ impl App {
     }
 }
 
+/// Returns true if every recorded gap falls within `expected_gap ± tolerance_pct%`.
+/// Always returns true when `expected` is empty (no timing constraint).
+pub(crate) fn gaps_pass_tolerance(recorded: &[u64], expected: &[u64], tolerance_pct: u32) -> bool {
+    if expected.is_empty() {
+        return true;
+    }
+    if recorded.len() != expected.len() {
+        return false;
+    }
+    let tol = tolerance_pct as f64 / 100.0;
+    recorded.iter().zip(expected.iter()).all(|(&got, &exp)| {
+        let lo = (exp as f64 * (1.0 - tol)) as u64;
+        let hi = (exp as f64 * (1.0 + tol)) as u64;
+        got >= lo && got <= hi
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{App, ComboTestResult, Screen, VaultState};
+    use super::{App, ComboProfile, ComboTestResult, Screen, VaultState, gaps_pass_tolerance};
+
+    // --- existing navigation / combo tests ---
 
     #[test]
     fn enter_opens_selected_home_screen() {
@@ -549,8 +610,6 @@ mod tests {
         assert!(app.record_combo_shortcut('3'));
         assert!(app.record_combo_shortcut('a'));
 
-        // "down down-right A" must parse successfully (not InvalidInput)
-        // We can verify by checking the recorded input parses
         use crate::combo::Combo;
         let parsed = Combo::parse(&app.recorded_combo_input());
         assert!(parsed.is_some(), "diagonal combo should parse");
@@ -585,6 +644,7 @@ mod tests {
             }
         );
     }
+
     #[test]
     fn vault_locks_when_navigating_home() {
         let mut app = App::default();
@@ -633,4 +693,199 @@ mod tests {
         assert_eq!(app.test_result, ComboTestResult::Waiting);
     }
 
+    // --- timestamps / gap tracking ---
+
+    #[test]
+    fn record_shortcut_captures_timestamps() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+
+        assert_eq!(app.recorded_timestamps.len(), 3);
+    }
+
+    #[test]
+    fn pop_removes_timestamp() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.pop_recorded_combo_token();
+
+        assert_eq!(app.recorded_timestamps.len(), 1);
+        assert_eq!(app.recorded_combo_tokens.len(), 1);
+    }
+
+    #[test]
+    fn clear_removes_all_timestamps() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.clear_recorded_combo();
+
+        assert!(app.recorded_timestamps.is_empty());
+    }
+
+    #[test]
+    fn test_clears_timestamps_on_completion() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+
+        assert!(app.recorded_timestamps.is_empty());
+    }
+
+    #[test]
+    fn load_selected_clears_timestamps() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+
+        app.record_combo_shortcut('d');
+        app.load_selected_test_combo();
+
+        assert!(app.recorded_timestamps.is_empty());
+    }
+
+    #[test]
+    fn recorded_gaps_ms_returns_empty_for_single_token() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+
+        assert!(app.recorded_gaps_ms().is_empty());
+    }
+
+    #[test]
+    fn recorded_gaps_ms_count_matches_token_pairs() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+
+        // 3 tokens → 2 gaps
+        assert_eq!(app.recorded_gaps_ms().len(), 2);
+    }
+
+    // --- timing with tolerance: profile that has recorded gaps ---
+
+    fn make_app_with_timed_profile(gaps_ms: Vec<u64>) -> App {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        // Replace the first profile with one that has gap constraints
+        app.combo_profiles[0] = ComboProfile {
+            name: "Quarter Turn",
+            sequence: "down right A",
+            status: "parsed",
+            timing_window_ms: 300,
+            gaps_ms,
+        };
+        app
+    }
+
+    #[test]
+    fn timing_match_passes_when_profile_has_no_gaps() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+
+        assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn"));
+    }
+
+    #[test]
+    fn timing_mismatch_when_gaps_outside_tolerance() {
+        let mut app = make_app_with_timed_profile(vec![200, 200]);
+        // Inject timestamps far outside tolerance by manually setting them.
+        // Simulated: record tokens, then replace timestamps with ones that give
+        // ~500 ms gaps, which is 150% of 200 ms — well beyond 40%.
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        app.record_combo_token("down");
+        app.record_combo_token("right");
+        app.record_combo_token("A");
+        // Overwrite timestamps: t0, t0+500ms, t0+1000ms → gaps [500, 500]
+        app.recorded_timestamps = vec![
+            t0,
+            t0 + Duration::from_millis(500),
+            t0 + Duration::from_millis(1000),
+        ];
+
+        app.test_recorded_combo();
+
+        assert_eq!(app.test_result, ComboTestResult::TimingMismatch);
+        assert_eq!(app.vault_state, VaultState::Locked);
+    }
+
+    #[test]
+    fn timing_match_passes_within_tolerance() {
+        let mut app = make_app_with_timed_profile(vec![200, 200]);
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        app.record_combo_token("down");
+        app.record_combo_token("right");
+        app.record_combo_token("A");
+        // gaps [210, 220] — within 40% of 200 ms (tolerance band: [120, 280])
+        app.recorded_timestamps = vec![
+            t0,
+            t0 + Duration::from_millis(210),
+            t0 + Duration::from_millis(430),
+        ];
+
+        app.test_recorded_combo();
+
+        assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn"));
+    }
+
+    // --- gaps_pass_tolerance unit tests ---
+
+    #[test]
+    fn tolerance_empty_expected_always_passes() {
+        assert!(gaps_pass_tolerance(&[100, 200], &[], 40));
+        assert!(gaps_pass_tolerance(&[], &[], 40));
+    }
+
+    #[test]
+    fn tolerance_exact_match_passes() {
+        assert!(gaps_pass_tolerance(&[200, 150], &[200, 150], 40));
+    }
+
+    #[test]
+    fn tolerance_within_band_passes() {
+        // band at 40%: [120, 280] for exp=200
+        assert!(gaps_pass_tolerance(&[250], &[200], 40));
+        assert!(gaps_pass_tolerance(&[130], &[200], 40));
+    }
+
+    #[test]
+    fn tolerance_outside_band_fails() {
+        // 300 is 50% above 200 → outside ±40%
+        assert!(!gaps_pass_tolerance(&[300], &[200], 40));
+        // 100 is 50% below 200 → outside ±40%
+        assert!(!gaps_pass_tolerance(&[100], &[200], 40));
+    }
+
+    #[test]
+    fn tolerance_length_mismatch_fails() {
+        assert!(!gaps_pass_tolerance(&[100], &[100, 200], 40));
+        assert!(!gaps_pass_tolerance(&[100, 200], &[100], 40));
+    }
+
+    #[test]
+    fn tolerance_zero_pct_requires_exact() {
+        assert!(gaps_pass_tolerance(&[200], &[200], 0));
+        assert!(!gaps_pass_tolerance(&[201], &[200], 0));
+    }
 }
