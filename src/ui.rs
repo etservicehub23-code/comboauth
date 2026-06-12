@@ -158,25 +158,10 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
         })
         .unwrap_or_else(|| "No predefined combo selected.".to_string());
 
-    let prefix_line = match app.prefix_match_state() {
-        None => ("".to_string(), Style::default().fg(Color::DarkGray)),
-        Some(MatchState::Partial { matched, remaining }) => (
-            format!("  {matched} step(s) matched, {remaining} remaining..."),
-            Style::default().fg(Color::Yellow),
-        ),
-        Some(MatchState::Full) => (
-            "  All steps matched — press Enter to confirm.".to_string(),
-            Style::default().fg(Color::Green),
-        ),
-        Some(MatchState::Mismatch { at }) => (
-            format!("  Mismatch at step {at}."),
-            Style::default().fg(Color::Red),
-        ),
-        Some(MatchState::TooLong) => (
-            "  Input is longer than the target combo.".to_string(),
-            Style::default().fg(Color::Red),
-        ),
-    };
+    let progress = combo_progress_line(
+        app.selected_combo_profile().map(|p| p.sequence),
+        app.prefix_match_state(),
+    );
 
     let result = match &app.test_result {
         ComboTestResult::Waiting => "Waiting for test.".to_string(),
@@ -204,7 +189,7 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(recorded),
-        Line::from(Span::styled(prefix_line.0, prefix_line.1)),
+        progress,
         Line::from(""),
         Line::from(selected),
         Line::from(result),
@@ -262,4 +247,62 @@ fn selectable_item(
         format!("{prefix}{}", label.into()),
         style,
     )))
+}
+
+fn combo_progress_line(profile_seq: Option<&str>, state: Option<MatchState>) -> Line<'static> {
+    let seq = match profile_seq {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            return Line::from(Span::styled(
+                "  No combo selected.",
+                Style::default().fg(Color::DarkGray),
+            ))
+        }
+    };
+
+    let steps: Vec<String> = seq.split_whitespace().map(|s| s.to_owned()).collect();
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(steps.len() * 2);
+
+    for (i, step) in steps.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" "));
+        }
+        let style = match &state {
+            None => Style::default().fg(Color::DarkGray),
+            Some(MatchState::Full) => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Some(MatchState::TooLong) => Style::default().fg(Color::Red),
+            Some(MatchState::Partial { matched, .. }) => {
+                if i < *matched {
+                    Style::default().fg(Color::Green)
+                } else if i == *matched {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                }
+            }
+            Some(MatchState::Mismatch { at }) => {
+                if i < *at {
+                    Style::default().fg(Color::Green)
+                } else if i == *at {
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                }
+            }
+        };
+        spans.push(Span::styled(format!("[{step}]"), style));
+    }
+
+    let (suffix, suffix_style): (&'static str, Style) = match &state {
+        None => ("  <- enter combo above", Style::default().fg(Color::DarkGray)),
+        Some(MatchState::Full) => ("  -> press Enter", Style::default().fg(Color::Green)),
+        Some(MatchState::TooLong) => ("  -> too long", Style::default().fg(Color::Red)),
+        Some(MatchState::Mismatch { .. }) => ("  -> wrong step", Style::default().fg(Color::Red)),
+        Some(MatchState::Partial { .. }) => ("", Style::default()),
+    };
+    if !suffix.is_empty() {
+        spans.push(Span::styled(suffix, suffix_style));
+    }
+
+    Line::from(spans)
 }
