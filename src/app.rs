@@ -18,6 +18,10 @@ pub struct App {
     pub timing_tolerance_pct: u32,
     pub test_result: ComboTestResult,
     pub vault_state: VaultState,
+    /// Phase within the RecordCombo screen.
+    pub record_phase: RecordPhase,
+    /// Text input buffer for the combo name during recording.
+    pub record_name_input: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +31,7 @@ pub enum Screen {
     Combos,
     TestLab,
     Settings,
+    RecordCombo,
     Quit,
 }
 
@@ -40,9 +45,9 @@ pub struct ServiceEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComboProfile {
-    pub name: &'static str,
-    pub sequence: &'static str,
-    pub status: &'static str,
+    pub name: String,
+    pub sequence: String,
+    pub status: String,
     pub timing_window_ms: u32,
     /// Recorded inter-keypress gaps (ms) from the original recording session.
     /// Empty means no timing constraint is enforced at test time.
@@ -52,7 +57,7 @@ pub struct ComboProfile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComboTestResult {
     Waiting,
-    Match(&'static str),
+    Match(String),
     NoMatch,
     InvalidInput,
     /// Sequence matched but inter-keypress timing fell outside the tolerance band.
@@ -69,6 +74,12 @@ pub enum VaultState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordPhase {
+    NameEntry,
+    TokenCapture,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingEntry {
     pub name: &'static str,
     pub value: &'static str,
@@ -82,6 +93,7 @@ impl Screen {
             Screen::Combos => "Combos",
             Screen::TestLab => "Test Lab",
             Screen::Settings => "Settings",
+            Screen::RecordCombo => "Record Combo",
             Screen::Quit => "Quit",
         }
     }
@@ -123,23 +135,23 @@ impl Default for App {
             ],
             combo_profiles: vec![
                 ComboProfile {
-                    name: "Quarter Turn",
-                    sequence: "down right A",
-                    status: "parsed",
+                    name: "Quarter Turn".to_owned(),
+                    sequence: "down right A".to_owned(),
+                    status: "parsed".to_owned(),
                     timing_window_ms: 300,
                     gaps_ms: vec![],
                 },
                 ComboProfile {
-                    name: "Dash Confirm",
-                    sequence: "left right B",
-                    status: "mock",
+                    name: "Dash Confirm".to_owned(),
+                    sequence: "left right B".to_owned(),
+                    status: "mock".to_owned(),
                     timing_window_ms: 400,
                     gaps_ms: vec![],
                 },
                 ComboProfile {
-                    name: "Focus Reset",
-                    sequence: "up down X",
-                    status: "mock",
+                    name: "Focus Reset".to_owned(),
+                    sequence: "up down X".to_owned(),
+                    status: "mock".to_owned(),
                     timing_window_ms: 500,
                     gaps_ms: vec![],
                 },
@@ -164,6 +176,8 @@ impl Default for App {
             timing_tolerance_pct: 40,
             test_result: ComboTestResult::Waiting,
             vault_state: VaultState::Locked,
+            record_phase: RecordPhase::NameEntry,
+            record_name_input: String::new(),
         }
     }
 }
@@ -194,6 +208,10 @@ impl App {
     }
 
     pub fn next_screen(&mut self) {
+        if self.current_screen == Screen::RecordCombo {
+            self.cancel_record_combo();
+            return;
+        }
         self.lock_vault_on_exit();
         self.current_screen = match self.current_screen {
             Screen::Home => self.home_items[self.selected_home_item],
@@ -201,12 +219,16 @@ impl App {
             Screen::Combos => Screen::TestLab,
             Screen::TestLab => Screen::Settings,
             Screen::Settings => Screen::Services,
-            Screen::Quit => Screen::Home,
+            Screen::Quit | Screen::RecordCombo => Screen::Home,
         };
         self.selected_detail_item = 0;
     }
 
     pub fn previous_screen(&mut self) {
+        if self.current_screen == Screen::RecordCombo {
+            self.cancel_record_combo();
+            return;
+        }
         self.lock_vault_on_exit();
         self.current_screen = match self.current_screen {
             Screen::Home => self.home_items[self.selected_home_item],
@@ -214,7 +236,7 @@ impl App {
             Screen::Combos => Screen::Services,
             Screen::TestLab => Screen::Combos,
             Screen::Settings => Screen::TestLab,
-            Screen::Quit => Screen::Home,
+            Screen::Quit | Screen::RecordCombo => Screen::Home,
         };
         self.selected_detail_item = 0;
     }
@@ -248,7 +270,7 @@ impl App {
     }
 
     pub fn record_combo_shortcut(&mut self, key: char) -> bool {
-        if self.current_screen != Screen::TestLab {
+        if !self.can_record_combo_tokens() {
             return false;
         }
 
@@ -277,7 +299,7 @@ impl App {
     }
 
     pub fn record_combo_token(&mut self, token: &str) {
-        if self.current_screen != Screen::TestLab {
+        if !self.can_record_combo_tokens() {
             return;
         }
         self.recorded_combo_tokens.push(token.to_owned());
@@ -287,7 +309,7 @@ impl App {
     }
 
     pub fn pop_recorded_combo_token(&mut self) {
-        if self.current_screen == Screen::TestLab {
+        if self.can_record_combo_tokens() {
             self.recorded_combo_tokens.pop();
             self.recorded_timestamps.pop();
             self.test_result = ComboTestResult::Waiting;
@@ -296,7 +318,7 @@ impl App {
     }
 
     pub fn clear_recorded_combo(&mut self) {
-        if self.current_screen == Screen::TestLab {
+        if self.can_record_combo_tokens() {
             self.recorded_combo_tokens.clear();
             self.recorded_timestamps.clear();
             self.test_result = ComboTestResult::Waiting;
@@ -317,7 +339,7 @@ impl App {
 
     pub fn test_recorded_combo(&mut self) {
         let (profile_name, profile_sequence, profile_gaps) = match self.selected_combo_profile() {
-            Some(p) => (p.name, p.sequence, p.gaps_ms.clone()),
+            Some(p) => (p.name.to_owned(), p.sequence.to_owned(), p.gaps_ms.clone()),
             None => {
                 self.test_result = ComboTestResult::InvalidInput;
                 return;
@@ -329,7 +351,7 @@ impl App {
             return;
         };
 
-        let Some(expected) = Combo::parse(profile_sequence) else {
+        let Some(expected) = Combo::parse(&profile_sequence) else {
             self.test_result = ComboTestResult::InvalidInput;
             return;
         };
@@ -344,7 +366,7 @@ impl App {
 
             if timing_ok {
                 self.test_result = ComboTestResult::Match(profile_name);
-                self.vault_state = self.unlock_vault_for_sequence(profile_sequence);
+                self.vault_state = self.unlock_vault_for_sequence(&profile_sequence);
             } else {
                 self.test_result = ComboTestResult::TimingMismatch;
                 self.vault_state = VaultState::Locked;
@@ -377,7 +399,7 @@ impl App {
 
     pub fn selected_timed_combo(&self) -> Option<TimedCombo> {
         let profile = self.selected_combo_profile()?;
-        let combo = Combo::parse(profile.sequence)?;
+        let combo = Combo::parse(&profile.sequence)?;
         Some(TimedCombo::new(combo, profile.timing_window_ms))
     }
 
@@ -386,9 +408,110 @@ impl App {
             return None;
         }
         let profile = self.selected_combo_profile()?;
-        let target = Combo::parse(profile.sequence)?;
+        let target = Combo::parse(&profile.sequence)?;
         let partial = Combo::parse(&self.recorded_combo_input())?;
         Some(target.match_prefix(&partial))
+    }
+
+    pub fn is_record_combo(&self) -> bool {
+        self.current_screen == Screen::RecordCombo
+    }
+
+    pub fn is_record_combo_name_entry(&self) -> bool {
+        self.current_screen == Screen::RecordCombo && self.record_phase == RecordPhase::NameEntry
+    }
+
+    pub fn is_record_combo_token_capture(&self) -> bool {
+        self.current_screen == Screen::RecordCombo && self.record_phase == RecordPhase::TokenCapture
+    }
+
+    /// Enter the combo recording screen, resetting all transient recording state.
+    pub fn start_record_combo(&mut self) {
+        self.current_screen = Screen::RecordCombo;
+        self.record_phase = RecordPhase::NameEntry;
+        self.record_name_input.clear();
+        self.recorded_combo_tokens.clear();
+        self.recorded_timestamps.clear();
+        self.test_result = ComboTestResult::Waiting;
+        self.vault_state = VaultState::Locked;
+    }
+
+    /// Append a printable character to the name input (max 40 chars).
+    pub fn record_name_push_char(&mut self, ch: char) {
+        if self.current_screen != Screen::RecordCombo
+            || self.record_phase != RecordPhase::NameEntry
+        {
+            return;
+        }
+        if self.record_name_input.len() < 40 && ch.is_ascii() && !ch.is_ascii_control() {
+            self.record_name_input.push(ch);
+        }
+    }
+
+    /// Remove the last character from the name input.
+    pub fn record_name_backspace(&mut self) {
+        if self.current_screen == Screen::RecordCombo
+            && self.record_phase == RecordPhase::NameEntry
+        {
+            self.record_name_input.pop();
+        }
+    }
+
+    /// Advance from NameEntry to TokenCapture if the name is non-empty.
+    pub fn confirm_name_entry(&mut self) {
+        if self.current_screen != Screen::RecordCombo
+            || self.record_phase != RecordPhase::NameEntry
+        {
+            return;
+        }
+        if !self.record_name_input.trim().is_empty() {
+            self.record_phase = RecordPhase::TokenCapture;
+            self.recorded_combo_tokens.clear();
+            self.recorded_timestamps.clear();
+        }
+    }
+
+    /// Save the recorded combo as a new profile and return to the Combos screen.
+    /// No-op if there are no tokens or the name is blank.
+    pub fn save_recorded_combo(&mut self) {
+        if self.current_screen != Screen::RecordCombo
+            || self.record_phase != RecordPhase::TokenCapture
+        {
+            return;
+        }
+        let name = self.record_name_input.trim().to_owned();
+        if name.is_empty() || self.recorded_combo_tokens.is_empty() {
+            return;
+        }
+        let sequence = self.recorded_combo_tokens.join(" ");
+        let gaps = self.recorded_gaps_ms();
+        self.combo_profiles.push(ComboProfile {
+            name,
+            sequence,
+            status: "recorded".to_owned(),
+            timing_window_ms: 500,
+            gaps_ms: gaps,
+        });
+        let last = self.combo_profiles.len() - 1;
+        self.selected_detail_item = last;
+        self.cancel_record_combo_inner(Screen::Combos);
+    }
+
+    /// Cancel recording and return to the Combos screen.
+    pub fn cancel_record_combo(&mut self) {
+        if self.current_screen == Screen::RecordCombo {
+            self.cancel_record_combo_inner(Screen::Combos);
+        }
+    }
+
+    fn cancel_record_combo_inner(&mut self, destination: Screen) {
+        self.current_screen = destination;
+        self.record_phase = RecordPhase::NameEntry;
+        self.record_name_input.clear();
+        self.recorded_combo_tokens.clear();
+        self.recorded_timestamps.clear();
+        self.test_result = ComboTestResult::Waiting;
+        self.vault_state = VaultState::Locked;
     }
 
     fn lock_vault_on_exit(&mut self) {
@@ -408,6 +531,12 @@ impl App {
         VaultState::Locked
     }
 
+    fn can_record_combo_tokens(&self) -> bool {
+        self.current_screen == Screen::TestLab
+            || (self.current_screen == Screen::RecordCombo
+                && self.record_phase == RecordPhase::TokenCapture)
+    }
+
     fn selected_index_mut(&mut self) -> &mut usize {
         if self.current_screen == Screen::Home {
             &mut self.selected_home_item
@@ -423,7 +552,7 @@ impl App {
             Screen::Combos => self.combo_profiles.len(),
             Screen::TestLab => self.combo_profiles.len(),
             Screen::Settings => self.settings.len(),
-            Screen::Quit => 0,
+            Screen::RecordCombo | Screen::Quit => 0,
         }
     }
 }
@@ -447,7 +576,7 @@ pub(crate) fn gaps_pass_tolerance(recorded: &[u64], expected: &[u64], tolerance_
 
 #[cfg(test)]
 mod tests {
-    use super::{App, ComboProfile, ComboTestResult, Screen, VaultState, gaps_pass_tolerance};
+    use super::{App, ComboProfile, ComboTestResult, RecordPhase, Screen, VaultState, gaps_pass_tolerance};
 
     // --- existing navigation / combo tests ---
 
@@ -494,7 +623,7 @@ mod tests {
         app.test_recorded_combo();
 
         assert_eq!(app.recorded_combo_input(), "");
-        assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn"));
+        assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn".to_owned()));
     }
 
     #[test]
@@ -784,9 +913,9 @@ mod tests {
         app.current_screen = Screen::TestLab;
         // Replace the first profile with one that has gap constraints
         app.combo_profiles[0] = ComboProfile {
-            name: "Quarter Turn",
-            sequence: "down right A",
-            status: "parsed",
+            name: "Quarter Turn".to_owned(),
+            sequence: "down right A".to_owned(),
+            status: "parsed".to_owned(),
             timing_window_ms: 300,
             gaps_ms,
         };
@@ -802,7 +931,7 @@ mod tests {
         app.record_combo_shortcut('a');
         app.test_recorded_combo();
 
-        assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn"));
+        assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn".to_owned()));
     }
 
     #[test]
@@ -846,7 +975,7 @@ mod tests {
 
         app.test_recorded_combo();
 
-        assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn"));
+        assert_eq!(app.test_result, ComboTestResult::Match("Quarter Turn".to_owned()));
     }
 
     // --- gaps_pass_tolerance unit tests ---
@@ -888,4 +1017,160 @@ mod tests {
         assert!(gaps_pass_tolerance(&[200], &[200], 0));
         assert!(!gaps_pass_tolerance(&[201], &[200], 0));
     }
+    // --- combo recording flow ---
+
+    #[test]
+    fn start_record_combo_enters_name_entry() {
+        let mut app = App::default();
+        app.start_record_combo();
+
+        assert_eq!(app.current_screen, Screen::RecordCombo);
+        assert_eq!(app.record_phase, RecordPhase::NameEntry);
+        assert!(app.record_name_input.is_empty());
+    }
+
+    #[test]
+    fn record_name_push_char_appends_to_input() {
+        let mut app = App::default();
+        app.start_record_combo();
+
+        app.record_name_push_char('H');
+        app.record_name_push_char('i');
+
+        assert_eq!(app.record_name_input, "Hi");
+    }
+
+    #[test]
+    fn record_name_backspace_removes_last_char() {
+        let mut app = App::default();
+        app.start_record_combo();
+
+        app.record_name_push_char('A');
+        app.record_name_push_char('B');
+        app.record_name_backspace();
+
+        assert_eq!(app.record_name_input, "A");
+    }
+
+    #[test]
+    fn confirm_name_entry_transitions_to_token_capture() {
+        let mut app = App::default();
+        app.start_record_combo();
+
+        app.record_name_push_char('T');
+        app.confirm_name_entry();
+
+        assert_eq!(app.record_phase, RecordPhase::TokenCapture);
+    }
+
+    #[test]
+    fn confirm_name_entry_rejected_when_name_is_blank() {
+        let mut app = App::default();
+        app.start_record_combo();
+
+        app.confirm_name_entry();
+
+        assert_eq!(app.record_phase, RecordPhase::NameEntry);
+    }
+
+    #[test]
+    fn token_capture_accepts_combo_shortcuts() {
+        let mut app = App::default();
+        app.start_record_combo();
+        app.record_name_push_char('T');
+        app.confirm_name_entry();
+
+        assert!(app.record_combo_shortcut('d'));
+        assert!(app.record_combo_shortcut('r'));
+        assert!(app.record_combo_shortcut('a'));
+
+        assert_eq!(app.recorded_combo_input(), "down right A");
+    }
+
+    #[test]
+    fn shortcuts_rejected_in_name_entry_phase() {
+        let mut app = App::default();
+        app.start_record_combo();
+
+        assert!(!app.record_combo_shortcut('d'));
+        assert!(app.recorded_combo_input().is_empty());
+    }
+
+    #[test]
+    fn save_recorded_combo_adds_profile_and_goes_to_combos() {
+        let initial_count = App::default().combo_profiles.len();
+        let mut app = App::default();
+        app.start_record_combo();
+        app.record_name_push_char('M');
+        app.record_name_push_char('y');
+        app.confirm_name_entry();
+        app.record_combo_shortcut('u');
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('a');
+
+        app.save_recorded_combo();
+
+        assert_eq!(app.combo_profiles.len(), initial_count + 1);
+        assert_eq!(app.current_screen, Screen::Combos);
+        let saved = app.combo_profiles.last().unwrap();
+        assert_eq!(saved.name, "My");
+        assert_eq!(saved.sequence, "up down A");
+        assert_eq!(saved.status, "recorded");
+    }
+
+    #[test]
+    fn save_recorded_combo_captures_gaps() {
+        let mut app = App::default();
+        app.start_record_combo();
+        app.record_name_push_char('G');
+        app.confirm_name_entry();
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+
+        app.save_recorded_combo();
+
+        // 3 tokens → 2 gaps
+        let saved = app.combo_profiles.last().unwrap();
+        assert_eq!(saved.gaps_ms.len(), 2);
+    }
+
+    #[test]
+    fn save_noop_when_tokens_empty() {
+        let initial_count = App::default().combo_profiles.len();
+        let mut app = App::default();
+        app.start_record_combo();
+        app.record_name_push_char('T');
+        app.confirm_name_entry();
+
+        app.save_recorded_combo();
+
+        assert_eq!(app.combo_profiles.len(), initial_count);
+        assert_eq!(app.current_screen, Screen::RecordCombo);
+    }
+
+    #[test]
+    fn cancel_record_combo_returns_to_combos() {
+        let mut app = App::default();
+        app.start_record_combo();
+        app.record_name_push_char('X');
+
+        app.cancel_record_combo();
+
+        assert_eq!(app.current_screen, Screen::Combos);
+        assert!(app.record_name_input.is_empty());
+    }
+
+    #[test]
+    fn record_combo_name_max_length_enforced() {
+        let mut app = App::default();
+        app.start_record_combo();
+
+        for _ in 0..50 {
+            app.record_name_push_char('a');
+        }
+
+        assert_eq!(app.record_name_input.len(), 40);
+    }
+
 }

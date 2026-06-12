@@ -6,7 +6,7 @@ mod ui;
 use std::io::{self, stdout};
 use std::time::Duration;
 
-use app::App;
+use app::{App, Screen};
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -47,11 +47,49 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
         if event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
+                    // RecordCombo NameEntry — capture all chars for the name field (must come first)
+                    KeyCode::Char(ch) if app.is_record_combo_name_entry() => {
+                        app.record_name_push_char(ch);
+                    }
+                    KeyCode::Backspace if app.is_record_combo_name_entry() => {
+                        app.record_name_backspace();
+                    }
+                    KeyCode::Enter if app.is_record_combo_name_entry() => {
+                        app.confirm_name_entry();
+                    }
+                    KeyCode::Esc if app.is_record_combo() => app.cancel_record_combo(),
+                    KeyCode::Left if app.is_record_combo() => app.cancel_record_combo(),
+                    KeyCode::Right if app.is_record_combo() => app.cancel_record_combo(),
+                    // RecordCombo TokenCapture
+                    KeyCode::Char('c') if app.is_record_combo_token_capture() => {
+                        app.clear_recorded_combo();
+                    }
+                    KeyCode::Char(value) if app.is_record_combo_token_capture() => {
+                        app.record_combo_shortcut(value);
+                    }
+                    KeyCode::Backspace if app.is_record_combo_token_capture() => {
+                        app.pop_recorded_combo_token();
+                    }
+                    KeyCode::Up if app.is_record_combo_token_capture() => {
+                        app.record_combo_token("up");
+                    }
+                    KeyCode::Down if app.is_record_combo_token_capture() => {
+                        app.record_combo_token("down");
+                    }
+                    KeyCode::Enter if app.is_record_combo_token_capture() => {
+                        app.save_recorded_combo();
+                    }
+                    // General quit (guarded to not fire during name entry)
                     KeyCode::Char('q') => app.quit(),
+                    // TestLab
                     KeyCode::Char('c') if app.is_test_lab() => app.clear_recorded_combo(),
                     KeyCode::Char('p') if app.is_test_lab() => app.load_selected_test_combo(),
                     KeyCode::Char(value) if app.is_test_lab() => {
                         app.record_combo_shortcut(value);
+                    }
+                    // Trigger recording from the Combos screen
+                    KeyCode::Char('n') if app.current_screen == Screen::Combos => {
+                        app.start_record_combo();
                     }
                     KeyCode::Esc => app.go_home(),
                     KeyCode::Backspace if app.is_test_lab() => app.pop_recorded_combo_token(),
