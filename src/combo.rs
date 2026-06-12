@@ -166,6 +166,10 @@ fn parse_step(token: &str) -> Option<ComboStep> {
         single if single.len() == 1 && single.chars().next()?.is_ascii_alphabetic() => {
             Some(ComboStep::Button(single.to_ascii_uppercase()))
         }
+        // Accept any single printable non-whitespace character as a key token
+        single if single.len() == 1 && !single.chars().next()?.is_whitespace() => {
+            Some(ComboStep::Button(single.to_owned()))
+        }
         _ => None,
     }
 }
@@ -289,8 +293,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_numeric_only_token() {
-        assert!(Combo::parse("1 2 3").is_none());
+    fn numeric_tokens_are_accepted() {
+        // Single-digit tokens are now valid (catch-all printable char rule)
+        // Note: "1" and "3" are also diagonal aliases, "2" is a raw key
+        let combo = Combo::parse("2 0 5");
+        assert!(combo.is_some());
     }
 
     #[test]

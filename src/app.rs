@@ -288,7 +288,19 @@ impl App {
             '9' => "up-right",
             '1' => "down-left",
             '3' => "down-right",
-            _ => return false,
+            other => {
+                // Record any other printable char as-is (uppercase for letters)
+                let s = if other.is_ascii_alphabetic() {
+                    other.to_ascii_uppercase().to_string()
+                } else {
+                    other.to_string()
+                };
+                self.recorded_combo_tokens.push(s);
+                self.recorded_timestamps.push(Instant::now());
+                self.test_result = ComboTestResult::Waiting;
+                self.vault_state = VaultState::Locked;
+                return true;
+            }
         };
 
         self.recorded_combo_tokens.push(token.to_owned());
@@ -691,12 +703,15 @@ mod tests {
     }
 
     #[test]
-    fn unknown_shortcut_key_is_rejected() {
+    fn unknown_shortcut_key_recorded_as_is() {
         let mut app = App::default();
         app.current_screen = Screen::TestLab;
 
-        assert!(!app.record_combo_shortcut('z'));
-        assert_eq!(app.recorded_combo_input(), "");
+        // Any printable char is now accepted; letters are uppercased
+        assert!(app.record_combo_shortcut('z'));
+        assert_eq!(app.recorded_combo_input(), "Z");
+        assert!(app.record_combo_shortcut('0'));
+        assert_eq!(app.recorded_combo_input(), "Z 0");
     }
 
     #[test]
