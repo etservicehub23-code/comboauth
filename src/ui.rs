@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 
-use crate::app::{App, ComboTestResult, Screen, VaultState};
+use crate::app::{App, ComboTestResult, Screen, ServicesPhase, VaultState};
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
@@ -67,28 +67,122 @@ fn render_home(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn render_services(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    match app.services_phase {
+        ServicesPhase::List => render_services_list(frame, app, area),
+        ServicesPhase::AddName => render_services_add_name(frame, app, area),
+        ServicesPhase::AssignCombo => render_services_assign_combo(frame, app, area),
+    }
+}
+
+fn render_services_list(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     let items: Vec<ListItem> = app
         .services
         .iter()
         .enumerate()
         .map(|(index, service)| {
+            let hint = if service.combo_hint.is_empty() {
+                "(no combo assigned)".to_owned()
+            } else {
+                service.combo_hint.clone()
+            };
+            let user = if service.username.is_empty() {
+                "-".to_owned()
+            } else {
+                service.username.clone()
+            };
             selectable_item(
                 index,
                 app.selected_detail_item,
-                format!(
-                    "{} | user: {} | combo: {}",
-                    service.name, service.username, service.combo_hint
-                ),
+                format!("{} | user: {} | combo: {}", service.name, user, hint),
             )
         })
         .collect();
 
     let list = List::new(items).block(
         Block::default()
-            .title("Services - mocked entries")
+            .title("Services  n: add service  a: assign combo")
             .borders(Borders::ALL),
     );
     frame.render_widget(list, area);
+}
+
+fn render_services_add_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let name_display = if app.service_name_input.is_empty() {
+        "_".to_owned()
+    } else {
+        format!("{}_", app.service_name_input)
+    };
+
+    let detail = Paragraph::new(vec![
+        Line::from("Add a new service entry"),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Name: "),
+            Span::styled(
+                name_display,
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Type a name, then press Enter to save",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "Esc to cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ])
+    .block(Block::default().title("Services — Add New").borders(Borders::ALL));
+    frame.render_widget(detail, area);
+}
+
+fn render_services_assign_combo(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(4), Constraint::Min(4)])
+        .split(area);
+
+    // Top: selected service info
+    let service = &app.services[app.selected_detail_item];
+    let current_hint = if service.combo_hint.is_empty() {
+        "(none)".to_owned()
+    } else {
+        service.combo_hint.clone()
+    };
+    let service_info = Paragraph::new(vec![
+        Line::from(vec![
+            Span::raw("Service: "),
+            Span::styled(service.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::raw("Current combo: "),
+            Span::styled(current_hint, Style::default().fg(Color::DarkGray)),
+        ]),
+    ])
+    .block(Block::default().title("Assign Combo — select and press Enter  Esc: cancel").borders(Borders::ALL));
+    frame.render_widget(service_info, chunks[0]);
+
+    // Bottom: combo picker
+    let items: Vec<ListItem> = app
+        .combo_profiles
+        .iter()
+        .enumerate()
+        .map(|(index, profile)| {
+            selectable_item(
+                index,
+                app.services_assign_cursor,
+                format!("{} | {}", profile.name, profile.sequence),
+            )
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title("Saved Combos")
+            .borders(Borders::ALL),
+    );
+    frame.render_widget(list, chunks[1]);
 }
 
 fn render_combos(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {

@@ -23,6 +23,12 @@ pub struct App {
     pub record_phase: RecordPhase,
     /// Text input buffer for the combo name during recording.
     pub record_name_input: String,
+    /// Current phase within the Services screen workflow.
+    pub services_phase: ServicesPhase,
+    /// Text input buffer for new service name entry.
+    pub service_name_input: String,
+    /// Cursor position within the combo profile picker during AssignCombo phase.
+    pub services_assign_cursor: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,10 +44,10 @@ pub enum Screen {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceEntry {
-    pub name: &'static str,
-    pub username: &'static str,
-    pub combo_hint: &'static str,
-    pub mock_secret: &'static str,
+    pub name: String,
+    pub username: String,
+    pub combo_hint: String,
+    pub mock_secret: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,8 +64,8 @@ pub enum ComboTestResult {
 pub enum VaultState {
     Locked,
     Unlocked {
-        service: &'static str,
-        placeholder: &'static str,
+        service: String,
+        placeholder: String,
     },
 }
 
@@ -67,6 +73,14 @@ pub enum VaultState {
 pub enum RecordPhase {
     NameEntry,
     TokenCapture,
+}
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServicesPhase {
+    List,
+    AddName,
+    AssignCombo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,22 +119,22 @@ impl Default for App {
             ],
             services: vec![
                 ServiceEntry {
-                    name: "GitHub",
-                    username: "demo.dev",
-                    combo_hint: "down right A",
-                    mock_secret: "***mock-gh-token-abc123***",
+                    name: "GitHub".to_owned(),
+                    username: "demo.dev".to_owned(),
+                    combo_hint: "down right A".to_owned(),
+                    mock_secret: "***mock-gh-token-abc123***".to_owned(),
                 },
                 ServiceEntry {
-                    name: "Research Wiki",
-                    username: "astro.local",
-                    combo_hint: "left right B",
-                    mock_secret: "***mock-wiki-pass-xyz789***",
+                    name: "Research Wiki".to_owned(),
+                    username: "astro.local".to_owned(),
+                    combo_hint: "left right B".to_owned(),
+                    mock_secret: "***mock-wiki-pass-xyz789***".to_owned(),
                 },
                 ServiceEntry {
-                    name: "Lab Notes",
-                    username: "mock-user",
-                    combo_hint: "up down X",
-                    mock_secret: "***mock-lab-key-def456***",
+                    name: "Lab Notes".to_owned(),
+                    username: "mock-user".to_owned(),
+                    combo_hint: "up down X".to_owned(),
+                    mock_secret: "***mock-lab-key-def456***".to_owned(),
                 },
             ],
             combo_profiles: vec![
@@ -168,6 +182,9 @@ impl Default for App {
             vault_state: VaultState::Locked,
             record_phase: RecordPhase::NameEntry,
             record_name_input: String::new(),
+            services_phase: ServicesPhase::List,
+            service_name_input: String::new(),
+            services_assign_cursor: 0,
         }
     }
 }
@@ -192,6 +209,8 @@ impl App {
     }
 
     pub fn go_home(&mut self) {
+        self.services_phase = ServicesPhase::List;
+        self.service_name_input.clear();
         self.lock_vault_on_exit();
         self.current_screen = Screen::Home;
         self.selected_detail_item = 0;
@@ -202,6 +221,8 @@ impl App {
             self.cancel_record_combo();
             return;
         }
+        self.services_phase = ServicesPhase::List;
+        self.service_name_input.clear();
         self.lock_vault_on_exit();
         self.current_screen = match self.current_screen {
             Screen::Home => self.home_items[self.selected_home_item],
@@ -219,6 +240,8 @@ impl App {
             self.cancel_record_combo();
             return;
         }
+        self.services_phase = ServicesPhase::List;
+        self.service_name_input.clear();
         self.lock_vault_on_exit();
         self.current_screen = match self.current_screen {
             Screen::Home => self.home_items[self.selected_home_item],
@@ -482,6 +505,88 @@ impl App {
         }
     }
 
+
+    pub fn is_services_add_name(&self) -> bool {
+        self.current_screen == Screen::Services && self.services_phase == ServicesPhase::AddName
+    }
+
+    pub fn is_services_assign_combo(&self) -> bool {
+        self.current_screen == Screen::Services && self.services_phase == ServicesPhase::AssignCombo
+    }
+
+    pub fn start_add_service(&mut self) {
+        if self.current_screen != Screen::Services || self.services_phase != ServicesPhase::List {
+            return;
+        }
+        self.services_phase = ServicesPhase::AddName;
+        self.service_name_input.clear();
+    }
+
+    pub fn service_name_push_char(&mut self, ch: char) {
+        if !self.is_services_add_name() {
+            return;
+        }
+        if self.service_name_input.len() < 40 && ch.is_ascii() && !ch.is_ascii_control() {
+            self.service_name_input.push(ch);
+        }
+    }
+
+    pub fn service_name_backspace(&mut self) {
+        if self.is_services_add_name() {
+            self.service_name_input.pop();
+        }
+    }
+
+    pub fn save_new_service(&mut self) {
+        if !self.is_services_add_name() {
+            return;
+        }
+        let name = self.service_name_input.trim().to_owned();
+        if name.is_empty() {
+            return;
+        }
+        self.services.push(ServiceEntry {
+            name,
+            username: String::new(),
+            combo_hint: String::new(),
+            mock_secret: String::new(),
+        });
+        self.selected_detail_item = self.services.len() - 1;
+        self.services_phase = ServicesPhase::List;
+        self.service_name_input.clear();
+    }
+
+    pub fn start_assign_combo(&mut self) {
+        if self.current_screen != Screen::Services
+            || self.services_phase != ServicesPhase::List
+            || self.combo_profiles.is_empty()
+            || self.services.is_empty()
+        {
+            return;
+        }
+        self.services_phase = ServicesPhase::AssignCombo;
+        self.services_assign_cursor = 0;
+    }
+
+    pub fn confirm_assign_combo(&mut self) {
+        if !self.is_services_assign_combo() {
+            return;
+        }
+        if self.combo_profiles.is_empty() || self.services.is_empty() {
+            return;
+        }
+        let sequence = self.combo_profiles[self.services_assign_cursor].sequence.clone();
+        self.services[self.selected_detail_item].combo_hint = sequence;
+        self.services_phase = ServicesPhase::List;
+    }
+
+    pub fn cancel_services_action(&mut self) {
+        if self.current_screen == Screen::Services && self.services_phase != ServicesPhase::List {
+            self.services_phase = ServicesPhase::List;
+            self.service_name_input.clear();
+        }
+    }
+
     fn cancel_record_combo_inner(&mut self, destination: Screen) {
         self.current_screen = destination;
         self.record_phase = RecordPhase::NameEntry;
@@ -501,8 +606,8 @@ impl App {
         for service in &self.services {
             if service.combo_hint == sequence {
                 return VaultState::Unlocked {
-                    service: service.name,
-                    placeholder: service.mock_secret,
+                    service: service.name.clone(),
+                    placeholder: service.mock_secret.clone(),
                 };
             }
         }
@@ -518,6 +623,10 @@ impl App {
     fn selected_index_mut(&mut self) -> &mut usize {
         if self.current_screen == Screen::Home {
             &mut self.selected_home_item
+        } else if self.current_screen == Screen::Services
+            && self.services_phase == ServicesPhase::AssignCombo
+        {
+            &mut self.services_assign_cursor
         } else {
             &mut self.selected_detail_item
         }
@@ -526,7 +635,10 @@ impl App {
     fn item_count(&self) -> usize {
         match self.current_screen {
             Screen::Home => self.home_items.len(),
-            Screen::Services => self.services.len(),
+            Screen::Services => match self.services_phase {
+                ServicesPhase::AssignCombo => self.combo_profiles.len(),
+                _ => self.services.len(),
+            },
             Screen::Combos => self.combo_profiles.len(),
             Screen::TestLab => 0,
             Screen::Settings => self.settings.len(),
@@ -554,7 +666,7 @@ pub(crate) fn gaps_pass_tolerance(recorded: &[u64], expected: &[u64], tolerance_
 
 #[cfg(test)]
 mod tests {
-    use super::{App, ComboProfile, ComboTestResult, RecordPhase, Screen, VaultState, gaps_pass_tolerance};
+    use super::{App, ComboProfile, ComboTestResult, RecordPhase, Screen, ServicesPhase, VaultState, gaps_pass_tolerance};
 
     // --- existing navigation / combo tests ---
 
@@ -629,8 +741,8 @@ mod tests {
         assert_eq!(
             app.vault_state,
             VaultState::Unlocked {
-                service: "GitHub",
-                placeholder: "***mock-gh-token-abc123***",
+                service: "GitHub".to_owned(),
+                placeholder: "***mock-gh-token-abc123***".to_owned(),
             }
         );
     }
@@ -717,8 +829,8 @@ mod tests {
         assert_eq!(
             app.vault_state,
             VaultState::Unlocked {
-                service: "Research Wiki",
-                placeholder: "***mock-wiki-pass-xyz789***",
+                service: "Research Wiki".to_owned(),
+                placeholder: "***mock-wiki-pass-xyz789***".to_owned(),
             }
         );
     }
@@ -1097,6 +1209,126 @@ mod tests {
 
         assert_eq!(app.current_screen, Screen::Combos);
         assert!(app.record_name_input.is_empty());
+    }
+
+    // --- Services flow ---
+
+    #[test]
+    fn start_add_service_enters_add_name_phase() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+
+        app.start_add_service();
+
+        assert_eq!(app.services_phase, ServicesPhase::AddName);
+        assert!(app.service_name_input.is_empty());
+    }
+
+    #[test]
+    fn save_new_service_adds_entry_and_returns_to_list() {
+        let initial = App::default().services.len();
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.start_add_service();
+        app.service_name_push_char('M');
+        app.service_name_push_char('y');
+        app.service_name_push_char('S');
+        app.service_name_push_char('v');
+        app.service_name_push_char('c');
+
+        app.save_new_service();
+
+        assert_eq!(app.services.len(), initial + 1);
+        assert_eq!(app.services.last().unwrap().name, "MySvc");
+        assert_eq!(app.services_phase, ServicesPhase::List);
+        assert_eq!(app.selected_detail_item, initial);
+    }
+
+    #[test]
+    fn save_new_service_noop_when_name_blank() {
+        let initial = App::default().services.len();
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.start_add_service();
+
+        app.save_new_service();
+
+        assert_eq!(app.services.len(), initial);
+        assert_eq!(app.services_phase, ServicesPhase::AddName);
+    }
+
+    #[test]
+    fn cancel_services_action_returns_to_list() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.start_add_service();
+        app.service_name_push_char('X');
+
+        app.cancel_services_action();
+
+        assert_eq!(app.services_phase, ServicesPhase::List);
+        assert!(app.service_name_input.is_empty());
+    }
+
+    #[test]
+    fn start_assign_combo_enters_assign_phase() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+
+        app.start_assign_combo();
+
+        assert_eq!(app.services_phase, ServicesPhase::AssignCombo);
+        assert_eq!(app.services_assign_cursor, 0);
+    }
+
+    #[test]
+    fn confirm_assign_combo_sets_combo_hint_on_service() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.selected_detail_item = 0;
+        app.start_assign_combo();
+        // cursor at 0 → "Quarter Turn" with sequence "down right A"
+        app.services_assign_cursor = 0;
+
+        app.confirm_assign_combo();
+
+        assert_eq!(app.services[0].combo_hint, "down right A");
+        assert_eq!(app.services_phase, ServicesPhase::List);
+    }
+
+    #[test]
+    fn assign_combo_cursor_navigates_profile_list() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.start_assign_combo();
+
+        app.next_item();
+
+        assert_eq!(app.services_assign_cursor, 1);
+    }
+
+    #[test]
+    fn start_assign_combo_noop_when_no_profiles() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.combo_profiles.clear();
+
+        app.start_assign_combo();
+
+        assert_eq!(app.services_phase, ServicesPhase::List);
+    }
+
+    #[test]
+    fn service_name_max_length_enforced() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.start_add_service();
+
+        for _ in 0..50 {
+            app.service_name_push_char('a');
+        }
+
+        assert_eq!(app.service_name_input.len(), 40);
     }
 
     #[test]
