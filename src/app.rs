@@ -1,7 +1,9 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::combo::Combo;
 pub use crate::profile::ComboProfile;
+
+pub const UNLOCK_TIMEOUT_SECS: u64 = 15;
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -19,6 +21,7 @@ pub struct App {
     pub timing_tolerance_pct: u32,
     pub test_result: ComboTestResult,
     pub vault_state: VaultState,
+    pub unlock_time: Option<Instant>,
     /// Phase within the RecordCombo screen.
     pub record_phase: RecordPhase,
     /// Text input buffer for the combo name during recording.
@@ -180,6 +183,7 @@ impl Default for App {
             timing_tolerance_pct: 40,
             test_result: ComboTestResult::Waiting,
             vault_state: VaultState::Locked,
+            unlock_time: None,
             record_phase: RecordPhase::NameEntry,
             record_name_input: String::new(),
             services_phase: ServicesPhase::List,
@@ -311,7 +315,7 @@ impl App {
                 self.recorded_combo_tokens.push(s);
                 self.recorded_timestamps.push(Instant::now());
                 self.test_result = ComboTestResult::Waiting;
-                self.vault_state = VaultState::Locked;
+                self.relock();
                 return true;
             }
         };
@@ -319,7 +323,7 @@ impl App {
         self.recorded_combo_tokens.push(token.to_owned());
         self.recorded_timestamps.push(Instant::now());
         self.test_result = ComboTestResult::Waiting;
-        self.vault_state = VaultState::Locked;
+        self.relock();
         true
     }
 
@@ -330,7 +334,7 @@ impl App {
         self.recorded_combo_tokens.push(token.to_owned());
         self.recorded_timestamps.push(Instant::now());
         self.test_result = ComboTestResult::Waiting;
-        self.vault_state = VaultState::Locked;
+        self.relock();
     }
 
     pub fn pop_recorded_combo_token(&mut self) {
@@ -338,7 +342,7 @@ impl App {
             self.recorded_combo_tokens.pop();
             self.recorded_timestamps.pop();
             self.test_result = ComboTestResult::Waiting;
-            self.vault_state = VaultState::Locked;
+            self.relock();
         }
     }
 
@@ -347,7 +351,7 @@ impl App {
             self.recorded_combo_tokens.clear();
             self.recorded_timestamps.clear();
             self.test_result = ComboTestResult::Waiting;
-            self.vault_state = VaultState::Locked;
+            self.relock();
         }
     }
 
@@ -391,13 +395,18 @@ impl App {
 
         if let Some((name, sequence)) = matched {
             self.vault_state = self.unlock_vault_for_sequence(&sequence);
+            self.unlock_time = if matches!(self.vault_state, VaultState::Unlocked { .. }) {
+                Some(Instant::now())
+            } else {
+                None
+            };
             self.test_result = ComboTestResult::Match(name);
         } else if sequence_matched_any {
             self.test_result = ComboTestResult::TimingMismatch;
-            self.vault_state = VaultState::Locked;
+            self.relock();
         } else {
             self.test_result = ComboTestResult::NoMatch;
-            self.vault_state = VaultState::Locked;
+            self.relock();
         }
     }
 
@@ -434,7 +443,7 @@ impl App {
         self.recorded_combo_tokens.clear();
         self.recorded_timestamps.clear();
         self.test_result = ComboTestResult::Waiting;
-        self.vault_state = VaultState::Locked;
+        self.relock();
     }
 
     /// Append a printable character to the name input (max 40 chars).
@@ -594,12 +603,25 @@ impl App {
         self.recorded_combo_tokens.clear();
         self.recorded_timestamps.clear();
         self.test_result = ComboTestResult::Waiting;
+        self.relock();
+    }
+
+    fn relock(&mut self) {
         self.vault_state = VaultState::Locked;
+        self.unlock_time = None;
     }
 
     fn lock_vault_on_exit(&mut self) {
-        self.vault_state = VaultState::Locked;
+        self.relock();
         self.test_result = ComboTestResult::Waiting;
+    }
+
+    pub fn tick(&mut self) {
+        if let Some(t) = self.unlock_time {
+            if t.elapsed() >= Duration::from_secs(UNLOCK_TIMEOUT_SECS) {
+                self.relock();
+            }
+        }
     }
 
     fn unlock_vault_for_sequence(&self, sequence: &str) -> VaultState {
@@ -666,7 +688,8 @@ pub(crate) fn gaps_pass_tolerance(recorded: &[u64], expected: &[u64], tolerance_
 
 #[cfg(test)]
 mod tests {
-    use super::{App, ComboProfile, ComboTestResult, RecordPhase, Screen, ServicesPhase, VaultState, gaps_pass_tolerance};
+    use std::time::Instant;
+    use super::{App, ComboProfile, ComboTestResult, RecordPhase, Screen, ServicesPhase, VaultState, gaps_pass_tolerance, UNLOCK_TIMEOUT_SECS};
 
     // --- existing navigation / combo tests ---
 
@@ -1341,6 +1364,93 @@ mod tests {
         }
 
         assert_eq!(app.record_name_input.len(), 40);
+    }
+
+    #[test]
+    fn vault_relocks_after_timeout() {
+        use std::time::Duration;
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+        assert!(matches!(app.vault_state, VaultState::Unlocked { .. }));
+        assert!(app.unlock_time.is_some());
+
+        app.unlock_time = Some(Instant::now() - Duration::from_secs(UNLOCK_TIMEOUT_SECS + 1));
+        app.tick();
+
+        assert_eq!(app.vault_state, VaultState::Locked);
+        assert!(app.unlock_time.is_none());
+    }
+
+    #[test]
+    fn vault_stays_unlocked_within_timeout() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+        assert!(matches!(app.vault_state, VaultState::Unlocked { .. }));
+
+        app.tick();
+
+        assert!(matches!(app.vault_state, VaultState::Unlocked { .. }));
+    }
+
+    #[test]
+    fn unlock_time_set_on_successful_match() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+
+        assert!(app.unlock_time.is_some());
+    }
+
+    #[test]
+    fn unlock_time_none_on_failed_match() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('u');
+        app.record_combo_shortcut('x');
+        app.test_recorded_combo();
+
+        assert!(app.unlock_time.is_none());
+    }
+
+    #[test]
+    fn unlock_time_cleared_on_go_home() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+        assert!(app.unlock_time.is_some());
+
+        app.go_home();
+
+        assert!(app.unlock_time.is_none());
+    }
+
+    #[test]
+    fn unlock_time_cleared_on_screen_change() {
+        let mut app = App::default();
+        app.current_screen = Screen::TestLab;
+        app.record_combo_shortcut('d');
+        app.record_combo_shortcut('r');
+        app.record_combo_shortcut('a');
+        app.test_recorded_combo();
+        assert!(app.unlock_time.is_some());
+
+        app.next_screen();
+
+        assert!(app.unlock_time.is_none());
     }
 
 }
