@@ -1,27 +1,48 @@
-use super::SecretStore;
+#![allow(dead_code)]
 
-/// In-memory mock vault — maps service names to placeholder secrets.
-/// No real credentials; used during M1–M5 development only.
+use std::collections::HashMap;
+
+use crate::service::ServiceId;
+use super::{SecretMaterial, SecretStore, SecretStoreError};
+
 pub struct MockSecretStore {
-    entries: Vec<(&'static str, &'static str)>,
+    entries: HashMap<ServiceId, SecretMaterial>,
 }
 
 impl MockSecretStore {
-    pub fn new(entries: Vec<(&'static str, &'static str)>) -> Self {
-        Self { entries }
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+}
+
+impl Default for MockSecretStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl SecretStore for MockSecretStore {
-    fn get(&self, service: &str) -> Option<&str> {
-        self.entries
-            .iter()
-            .find(|(name, _)| *name == service)
-            .map(|(_, secret)| *secret)
+    fn get_secret(&self, id: &ServiceId) -> Result<SecretMaterial, SecretStoreError> {
+        self.entries.get(id).cloned().ok_or(SecretStoreError::NotFound)
     }
 
-    fn services(&self) -> Vec<&str> {
-        self.entries.iter().map(|(name, _)| *name).collect()
+    fn put_secret(&mut self, id: ServiceId, secret: SecretMaterial) -> Result<(), SecretStoreError> {
+        self.entries.insert(id, secret);
+        Ok(())
+    }
+
+    fn delete_secret(&mut self, id: &ServiceId) -> Result<(), SecretStoreError> {
+        if self.entries.remove(id).is_some() {
+            Ok(())
+        } else {
+            Err(SecretStoreError::NotFound)
+        }
+    }
+
+    fn contains_secret(&self, id: &ServiceId) -> bool {
+        self.entries.contains_key(id)
     }
 }
 
@@ -29,31 +50,23 @@ impl SecretStore for MockSecretStore {
 mod tests {
     use super::*;
 
-    fn make_store() -> MockSecretStore {
-        MockSecretStore::new(vec![
-            ("GitHub", "***mock-gh-token-abc123***"),
-            ("Research Wiki", "***mock-wiki-pass-xyz789***"),
-        ])
+    #[test]
+    fn mock_secret_store_round_trips_by_service_id() {
+        let mut store = MockSecretStore::new();
+        let id = ServiceId("github".to_owned());
+        store
+            .put_secret(id.clone(), SecretMaterial::new(b"test-secret".to_vec()))
+            .unwrap();
+        let retrieved = store.get_secret(&id).unwrap();
+        assert_eq!(retrieved.expose_bytes(), b"test-secret");
     }
 
     #[test]
-    fn get_returns_secret_for_known_service() {
-        let store = make_store();
-        assert_eq!(store.get("GitHub"), Some("***mock-gh-token-abc123***"));
-    }
-
-    #[test]
-    fn get_returns_none_for_unknown_service() {
-        let store = make_store();
-        assert_eq!(store.get("NoSuchService"), None);
-    }
-
-    #[test]
-    fn services_lists_all_names() {
-        let store = make_store();
-        let names = store.services();
-        assert!(names.contains(&"GitHub"));
-        assert!(names.contains(&"Research Wiki"));
-        assert_eq!(names.len(), 2);
+    fn mock_secret_store_unknown_returns_not_found() {
+        let store = MockSecretStore::new();
+        let err = store
+            .get_secret(&ServiceId("nonexistent".to_owned()))
+            .unwrap_err();
+        assert_eq!(err, SecretStoreError::NotFound);
     }
 }
