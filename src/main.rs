@@ -1,3 +1,4 @@
+mod activation;
 mod service;
 mod app;
 mod profile;
