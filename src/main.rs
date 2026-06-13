@@ -1,3 +1,4 @@
+mod service;
 mod app;
 mod profile;
 mod vault;
