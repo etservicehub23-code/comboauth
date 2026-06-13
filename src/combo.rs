@@ -24,18 +24,21 @@ pub enum Direction {
 }
 
 /// Timing constraint for combo input — how long the full sequence may take.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimingWindow {
     pub window_ms: u32,
 }
 
 impl TimingWindow {
+    #[allow(dead_code)]
     pub fn new(window_ms: u32) -> Self {
         Self { window_ms }
     }
 }
 
 /// A combo paired with an input timing constraint.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimedCombo {
     pub combo: Combo,
@@ -43,6 +46,7 @@ pub struct TimedCombo {
 }
 
 impl TimedCombo {
+    #[allow(dead_code)]
     pub fn new(combo: Combo, window_ms: u32) -> Self {
         Self {
             combo,
@@ -52,6 +56,7 @@ impl TimedCombo {
 }
 
 /// Describes how a partial combo input aligns against a target combo.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchState {
     /// Input steps are a valid prefix of the target; how many matched and remain.
@@ -114,6 +119,7 @@ impl Combo {
         &self.steps
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.steps.len()
     }
@@ -123,6 +129,7 @@ impl Combo {
         self.steps.is_empty()
     }
 
+    #[allow(dead_code)]
     pub fn match_prefix(&self, partial: &Combo) -> MatchState {
         let target = &self.steps;
         let input = &partial.steps;

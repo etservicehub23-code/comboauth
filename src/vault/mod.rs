@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod mock;
 
 /// Backend trait for storing and retrieving secrets keyed by service name.
