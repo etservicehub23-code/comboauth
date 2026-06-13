@@ -1,10 +1,11 @@
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 
-use crate::app::{App, ComboTestResult, Screen, ServicesPhase, VaultState};
+use crate::activation::ActivationResult;
+use crate::app::{App, Screen, ServicesPhase};
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
@@ -30,13 +31,20 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     .block(Block::default().borders(Borders::ALL));
     frame.render_widget(title, chunks[0]);
 
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(28), Constraint::Min(20)])
+        .split(chunks[1]);
+
+    render_sidebar(frame, app, body[0]);
+
     match app.current_screen {
-        Screen::Home => render_home(frame, app, chunks[1]),
-        Screen::Services => render_services(frame, app, chunks[1]),
-        Screen::Combos => render_combos(frame, app, chunks[1]),
-        Screen::TestLab => render_test_lab(frame, app, chunks[1]),
-        Screen::Settings => render_settings(frame, app, chunks[1]),
-        Screen::RecordCombo => render_record_combo(frame, app, chunks[1]),
+        Screen::Home => render_home(frame, app, body[1]),
+        Screen::Services => render_services(frame, app, body[1]),
+        Screen::Combos => render_combos(frame, app, body[1]),
+        Screen::TestLab => render_test_lab(frame, app, body[1]),
+        Screen::Settings => render_settings(frame, app, body[1]),
+        Screen::RecordCombo => render_record_combo(frame, app, body[1]),
         Screen::Quit => {}
     }
 
@@ -47,14 +55,73 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         .unwrap_or_else(|| "No demo combo loaded.".to_string());
 
     let help = Paragraph::new(format!(
-        "{demo_combo} Up/Down: select. Enter: open. Left/Right: screens. Esc: home. q: quit."
+        "{demo_combo} Up/Down: select. Enter: open. Left/Right: screens. Esc: home. Ctrl-K: quick launch. q: quit."
     ))
     .alignment(Alignment::Center)
     .block(Block::default().borders(Borders::ALL));
     frame.render_widget(help, chunks[2]);
+
+    if app.quick_launch_open {
+        render_quick_launch_popup(frame, app, area);
+    }
 }
 
-fn render_home(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_sidebar(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let items: Vec<ListItem> = app
+        .service_registry
+        .services()
+        .iter()
+        .map(|service| {
+            let label = format!("{} [{}]", service.name, service.status.label());
+            ListItem::new(Line::from(Span::raw(label)))
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .title("Services")
+            .borders(Borders::ALL),
+    );
+    frame.render_widget(list, area);
+}
+
+fn render_quick_launch_popup(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let popup_width = 40u16;
+    let popup_height = 5u16;
+    let x = area.width.saturating_sub(popup_width) / 2;
+    let y = area.height.saturating_sub(popup_height) / 2;
+    let popup_area = Rect {
+        x: area.x + x,
+        y: area.y + y,
+        width: popup_width.min(area.width),
+        height: popup_height.min(area.height),
+    };
+
+    let step_count = app.quick_launch_tokens.len();
+    let content = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("Input: {step_count} steps captured"),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Enter: activate  Esc: cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ])
+    .alignment(Alignment::Center)
+    .block(
+        Block::default()
+            .title("Quick Launch  Ctrl-K")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::Cyan)),
+    );
+
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(content, popup_area);
+}
+
+fn render_home(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .home_items
         .iter()
@@ -66,7 +133,7 @@ fn render_home(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
     frame.render_widget(menu, area);
 }
 
-fn render_services(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_services(frame: &mut Frame<'_>, app: &App, area: Rect) {
     match app.services_phase {
         ServicesPhase::List => render_services_list(frame, app, area),
         ServicesPhase::AddName => render_services_add_name(frame, app, area),
@@ -74,17 +141,13 @@ fn render_services(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
     }
 }
 
-fn render_services_list(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_services_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
-        .services
+        .service_registry
+        .services()
         .iter()
         .enumerate()
         .map(|(index, service)| {
-            let hint = if service.combo_hint.is_empty() {
-                "(no combo assigned)".to_owned()
-            } else {
-                service.combo_hint.clone()
-            };
             let user = if service.username.is_empty() {
                 "-".to_owned()
             } else {
@@ -93,7 +156,7 @@ fn render_services_list(frame: &mut Frame<'_>, app: &App, area: ratatui::layout:
             selectable_item(
                 index,
                 app.selected_detail_item,
-                format!("{} | user: {} | combo: {}", service.name, user, hint),
+                format!("{} | user: {} | {}", service.name, user, service.status.label()),
             )
         })
         .collect();
@@ -106,7 +169,7 @@ fn render_services_list(frame: &mut Frame<'_>, app: &App, area: ratatui::layout:
     frame.render_widget(list, area);
 }
 
-fn render_services_add_name(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_services_add_name(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let name_display = if app.service_name_input.is_empty() {
         "_".to_owned()
     } else {
@@ -137,33 +200,31 @@ fn render_services_add_name(frame: &mut Frame<'_>, app: &App, area: ratatui::lay
     frame.render_widget(detail, area);
 }
 
-fn render_services_assign_combo(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_services_assign_combo(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(4), Constraint::Min(4)])
         .split(area);
 
-    // Top: selected service info
-    let service = &app.services[app.selected_detail_item];
-    let current_hint = if service.combo_hint.is_empty() {
-        "(none)".to_owned()
-    } else {
-        service.combo_hint.clone()
-    };
+    let services = app.service_registry.services();
+    let (service_name, current_status) = services
+        .get(app.selected_detail_item)
+        .map(|s| (s.name.clone(), s.status.label()))
+        .unwrap_or_else(|| ("(none)".to_owned(), ""));
+
     let service_info = Paragraph::new(vec![
         Line::from(vec![
             Span::raw("Service: "),
-            Span::styled(service.name.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(service_name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::raw("Current combo: "),
-            Span::styled(current_hint, Style::default().fg(Color::DarkGray)),
+            Span::raw("Status: "),
+            Span::styled(current_status, Style::default().fg(Color::DarkGray)),
         ]),
     ])
     .block(Block::default().title("Assign Combo — select and press Enter  Esc: cancel").borders(Borders::ALL));
     frame.render_widget(service_info, chunks[0]);
 
-    // Bottom: combo picker
     let items: Vec<ListItem> = app
         .combo_profiles
         .iter()
@@ -172,7 +233,7 @@ fn render_services_assign_combo(frame: &mut Frame<'_>, app: &App, area: ratatui:
             selectable_item(
                 index,
                 app.services_assign_cursor,
-                format!("{} | {}", profile.name, profile.sequence),
+                profile.name.clone(),
             )
         })
         .collect();
@@ -185,7 +246,7 @@ fn render_services_assign_combo(frame: &mut Frame<'_>, app: &App, area: ratatui:
     frame.render_widget(list, chunks[1]);
 }
 
-fn render_combos(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_combos(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .combo_profiles
         .iter()
@@ -207,7 +268,7 @@ fn render_combos(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) 
     frame.render_widget(list, area);
 }
 
-fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let recorded = app.recorded_combo_input();
     let input_span = if recorded.is_empty() {
         Span::styled("(nothing yet)", Style::default().fg(Color::DarkGray))
@@ -215,38 +276,35 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
         Span::styled(recorded, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
     };
 
-    let result_line = match &app.test_result {
-        ComboTestResult::Waiting => Line::from(Span::styled(
+    let result_line = match &app.last_activation {
+        ActivationResult::Waiting => Line::from(Span::styled(
             "Enter your combo, then press Enter.",
             Style::default().fg(Color::DarkGray),
         )),
-        ComboTestResult::Match(name) => Line::from(Span::styled(
-            format!("Unlocked: {name}"),
+        ActivationResult::Activated { service_name, .. } => Line::from(Span::styled(
+            format!("Activated: {service_name}"),
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
         )),
-        ComboTestResult::NoMatch => Line::from(Span::styled(
+        ActivationResult::NoMatch => Line::from(Span::styled(
             "No match — unrecognised combo.",
             Style::default().fg(Color::Red),
         )),
-        ComboTestResult::InvalidInput => Line::from(Span::styled(
+        ActivationResult::InvalidInput => Line::from(Span::styled(
             "Nothing to test — enter some keys first.",
             Style::default().fg(Color::Red),
         )),
-        ComboTestResult::TimingMismatch => Line::from(Span::styled(
+        ActivationResult::TimingMismatch => Line::from(Span::styled(
             "Sequence matched but rhythm was off.",
             Style::default().fg(Color::Yellow),
         )),
-    };
-
-    let (vault_label, vault_style) = match &app.vault_state {
-        VaultState::Locked => (
-            "Vault: [locked]".to_string(),
-            Style::default().fg(Color::DarkGray),
-        ),
-        VaultState::Unlocked { service, placeholder } => (
-            format!("Vault: {service} -> {placeholder}"),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-        ),
+        ActivationResult::NoServiceForCombo { combo_name, .. } => Line::from(Span::styled(
+            format!("No service assigned to combo: {combo_name}"),
+            Style::default().fg(Color::Yellow),
+        )),
+        ActivationResult::SecretUnavailable { service_name, .. } => Line::from(Span::styled(
+            format!("Secret unavailable for: {service_name}"),
+            Style::default().fg(Color::Red),
+        )),
     };
 
     let detail = Paragraph::new(vec![
@@ -256,8 +314,6 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
         Line::from(vec![Span::raw("Input: "), input_span]),
         Line::from(""),
         result_line,
-        Line::from(""),
-        Line::from(Span::styled(vault_label, vault_style)),
         Line::from(""),
         Line::from(Span::styled(
             "Arrows / u d l r a b x y  diagonals: 7=UL 9=UR 1=DL 3=DR",
@@ -276,7 +332,7 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
     frame.render_widget(detail, area);
 }
 
-fn render_settings(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_settings(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .settings
         .iter()
@@ -298,8 +354,7 @@ fn render_settings(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect
     frame.render_widget(list, area);
 }
 
-
-fn render_record_combo(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::Rect) {
+fn render_record_combo(frame: &mut Frame<'_>, app: &App, area: Rect) {
     use crate::app::RecordPhase;
 
     let (phase_label, body_lines) = match app.record_phase {
@@ -332,11 +387,14 @@ fn render_record_combo(frame: &mut Frame<'_>, app: &App, area: ratatui::layout::
             ("Name Entry", lines)
         }
         RecordPhase::TokenCapture => {
-            let tokens = app.recorded_combo_input();
-            let token_display = if tokens.is_empty() {
+            let step_count = app.recorded_combo_tokens.len();
+            let token_display = if step_count == 0 {
                 Span::styled("(no tokens yet)", Style::default().fg(Color::DarkGray))
             } else {
-                Span::styled(tokens, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                Span::styled(
+                    format!("{step_count} steps captured"),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                )
             };
             let gap_count = app.recorded_gaps_ms().len();
             let gap_label = match gap_count {

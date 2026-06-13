@@ -11,7 +11,7 @@ use std::io::{self, stdout};
 use std::time::Duration;
 
 use app::{App, Screen, ServicesPhase};
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -51,6 +51,56 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
 
         if event::poll(Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
+                // Ctrl-K: toggle quick-launch overlay (highest priority)
+                if key.code == KeyCode::Char('k') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    app.quick_launch_open = !app.quick_launch_open;
+                    if !app.quick_launch_open {
+                        app.quick_launch_tokens.clear();
+                        app.quick_launch_timestamps.clear();
+                    }
+                    continue;
+                }
+
+                // Quick-launch overlay captures all input when open
+                if app.quick_launch_open {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.quick_launch_open = false;
+                            app.quick_launch_tokens.clear();
+                            app.quick_launch_timestamps.clear();
+                        }
+                        KeyCode::Enter => {
+                            app.activate_quick_launch();
+                        }
+                        KeyCode::Up => {
+                            app.quick_launch_tokens.push("up".to_owned());
+                            app.quick_launch_timestamps.push(std::time::Instant::now());
+                        }
+                        KeyCode::Down => {
+                            app.quick_launch_tokens.push("down".to_owned());
+                            app.quick_launch_timestamps.push(std::time::Instant::now());
+                        }
+                        KeyCode::Left => {
+                            app.quick_launch_tokens.push("left".to_owned());
+                            app.quick_launch_timestamps.push(std::time::Instant::now());
+                        }
+                        KeyCode::Right => {
+                            app.quick_launch_tokens.push("right".to_owned());
+                            app.quick_launch_timestamps.push(std::time::Instant::now());
+                        }
+                        KeyCode::Backspace => {
+                            app.quick_launch_tokens.pop();
+                            app.quick_launch_timestamps.pop();
+                        }
+                        KeyCode::Char(ch) => {
+                            app.quick_launch_tokens.push(ch.to_string());
+                            app.quick_launch_timestamps.push(std::time::Instant::now());
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 match key.code {
                     // RecordCombo NameEntry — capture all chars for the name field (must come first)
                     KeyCode::Char(ch) if app.is_record_combo_name_entry() => {
@@ -111,7 +161,6 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                         app.cancel_services_action();
                     }
                     // General quit (guarded to not fire during name entry)
-
                     KeyCode::Char('q') => app.quit(),
                     // TestLab
                     KeyCode::Char('c') if app.is_test_lab() => app.clear_recorded_combo(),
