@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::combo::Combo;
-pub use crate::profile::ComboProfile;
+pub use crate::profile::{ComboProfile, ComboProfileId};
 
 pub const UNLOCK_TIMEOUT_SECS: u64 = 15;
 
@@ -142,6 +142,7 @@ impl Default for App {
             ],
             combo_profiles: vec![
                 ComboProfile {
+                    id: ComboProfileId("quarter-turn".to_owned()),
                     name: "Quarter Turn".to_owned(),
                     sequence: "down right A".to_owned(),
                     status: "parsed".to_owned(),
@@ -149,6 +150,7 @@ impl Default for App {
                     gaps_ms: vec![],
                 },
                 ComboProfile {
+                    id: ComboProfileId("dash-confirm".to_owned()),
                     name: "Dash Confirm".to_owned(),
                     sequence: "left right B".to_owned(),
                     status: "mock".to_owned(),
@@ -156,6 +158,7 @@ impl Default for App {
                     gaps_ms: vec![],
                 },
                 ComboProfile {
+                    id: ComboProfileId("focus-reset".to_owned()),
                     name: "Focus Reset".to_owned(),
                     sequence: "up down X".to_owned(),
                     status: "mock".to_owned(),
@@ -495,7 +498,9 @@ impl App {
         }
         let sequence = self.recorded_combo_tokens.join(" ");
         let gaps = self.recorded_gaps_ms();
+        let id = ComboProfileId(name.to_lowercase().replace(' ', "-"));
         self.combo_profiles.push(ComboProfile {
+            id,
             name,
             sequence,
             status: "recorded".to_owned(),
@@ -689,7 +694,7 @@ pub(crate) fn gaps_pass_tolerance(recorded: &[u64], expected: &[u64], tolerance_
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
-    use super::{App, ComboProfile, ComboTestResult, RecordPhase, Screen, ServicesPhase, VaultState, gaps_pass_tolerance, UNLOCK_TIMEOUT_SECS};
+    use super::{App, ComboProfile, ComboProfileId, ComboTestResult, RecordPhase, Screen, ServicesPhase, VaultState, gaps_pass_tolerance, UNLOCK_TIMEOUT_SECS};
 
     // --- existing navigation / combo tests ---
 
@@ -986,6 +991,7 @@ mod tests {
         app.current_screen = Screen::TestLab;
         // Replace the first profile with one that has gap constraints
         app.combo_profiles[0] = ComboProfile {
+            id: ComboProfileId("quarter-turn".to_owned()),
             name: "Quarter Turn".to_owned(),
             sequence: "down right A".to_owned(),
             status: "parsed".to_owned(),

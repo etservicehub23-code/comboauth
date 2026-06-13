@@ -1,6 +1,10 @@
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ComboProfileId(pub String);
+
 /// A saved combo profile: name, token sequence, recorded timing gaps, and metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComboProfile {
+    pub id: ComboProfileId,
     pub name: String,
     pub sequence: String,
     pub status: String,
