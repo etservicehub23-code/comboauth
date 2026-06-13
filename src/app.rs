@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use crate::combo::Combo;
+pub use crate::profile::ComboProfile;
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -41,17 +42,6 @@ pub struct ServiceEntry {
     pub username: &'static str,
     pub combo_hint: &'static str,
     pub mock_secret: &'static str,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ComboProfile {
-    pub name: String,
-    pub sequence: String,
-    pub status: String,
-    pub timing_window_ms: u32,
-    /// Recorded inter-keypress gaps (ms) from the original recording session.
-    /// Empty means no timing constraint is enforced at test time.
-    pub gaps_ms: Vec<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

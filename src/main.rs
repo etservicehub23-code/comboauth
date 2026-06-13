@@ -1,4 +1,6 @@
 mod app;
+mod profile;
+mod vault;
 mod combo;
 mod error;
 mod ui;
