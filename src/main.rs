@@ -1,4 +1,5 @@
 mod activation;
+mod audit;
 mod delivery;
 mod persistence;
 mod service;

@@ -8,6 +8,7 @@ use crate::persistence::{MockPersistenceStore, PersistenceStore};
 use crate::vault::mock::MockSecretStore;
 use crate::vault::{SecretMaterial, SecretStore};
 use crate::delivery::{ClipboardSink, SecretSink, CLIPBOARD_TIMEOUT_SECS};
+use crate::audit::{self, AuditEvent, FailReason};
 
 pub const UNLOCK_TIMEOUT_SECS: u64 = 15;
 
@@ -475,13 +476,18 @@ impl App {
                 .map(|s| (s.id.clone(), s.name.clone()));
 
             if let Some((service_id, service_name)) = lookup {
-                if let Ok(secret) = self.secret_store.get_secret(&service_id) {
-                    if ClipboardSink.deliver(&secret).is_ok() {
-                        self.clipboard_clear_at = Some(
-                            Instant::now() + Duration::from_secs(CLIPBOARD_TIMEOUT_SECS),
-                        );
-                    }
+                let delivered = if let Ok(secret) = self.secret_store.get_secret(&service_id) {
+                    ClipboardSink.deliver(&secret).is_ok()
+                } else {
+                    audit::log(AuditEvent::Failed { reason: FailReason::SecretUnavailable });
+                    false
+                };
+                if delivered {
+                    self.clipboard_clear_at = Some(
+                        Instant::now() + Duration::from_secs(CLIPBOARD_TIMEOUT_SECS),
+                    );
                 }
+                audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
                 self.last_activation = ActivationResult::Activated { service_id, service_name };
                 self.unlock_time = Some(Instant::now());
             } else {
@@ -494,9 +500,11 @@ impl App {
                 self.unlock_time = None;
             }
         } else if sequence_matched_any {
+            audit::log(AuditEvent::Failed { reason: FailReason::TimingMismatch });
             self.last_activation = ActivationResult::TimingMismatch;
             self.unlock_time = None;
         } else {
+            audit::log(AuditEvent::Failed { reason: FailReason::NoMatch });
             self.last_activation = ActivationResult::NoMatch;
             self.unlock_time = None;
         }
@@ -526,13 +534,18 @@ impl App {
                 .map(|s| (s.id.clone(), s.name.clone()));
 
             if let Some((service_id, service_name)) = lookup {
-                if let Ok(secret) = self.secret_store.get_secret(&service_id) {
-                    if ClipboardSink.deliver(&secret).is_ok() {
-                        self.clipboard_clear_at = Some(
-                            Instant::now() + Duration::from_secs(CLIPBOARD_TIMEOUT_SECS),
-                        );
-                    }
+                let delivered = if let Ok(secret) = self.secret_store.get_secret(&service_id) {
+                    ClipboardSink.deliver(&secret).is_ok()
+                } else {
+                    audit::log(AuditEvent::Failed { reason: FailReason::SecretUnavailable });
+                    false
+                };
+                if delivered {
+                    self.clipboard_clear_at = Some(
+                        Instant::now() + Duration::from_secs(CLIPBOARD_TIMEOUT_SECS),
+                    );
                 }
+                audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
                 self.last_activation = ActivationResult::Activated { service_id, service_name };
                 self.unlock_time = Some(Instant::now());
             } else {
@@ -545,6 +558,7 @@ impl App {
                 self.unlock_time = None;
             }
         } else {
+            audit::log(AuditEvent::Failed { reason: FailReason::NoMatch });
             self.last_activation = ActivationResult::NoMatch;
             self.unlock_time = None;
         }
