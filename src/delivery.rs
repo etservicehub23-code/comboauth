@@ -37,6 +37,21 @@ impl SecretSink for ClipboardSink {
     }
 }
 
+/// Writes the secret bytes to stdout followed by a newline.
+///
+/// Intended for git askpass / credential helper integration.
+pub struct StdoutSink;
+
+impl SecretSink for StdoutSink {
+    fn deliver(&self, secret: &SecretMaterial) -> Result<(), DeliveryError> {
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        out.write_all(secret.expose_bytes())
+            .and_then(|_| out.write_all(b"\n"))
+            .map_err(|e| DeliveryError::Command(e.to_string()))
+    }
+}
+
 /// No-op sink for tests and platforms without clipboard support.
 pub struct NullSink;
 

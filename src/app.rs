@@ -136,7 +136,7 @@ fn default_secret_store() -> MockSecretStore {
 
 impl Default for App {
     fn default() -> Self {
-        Self {
+        let mut app = Self {
             should_quit: false,
             current_screen: Screen::Home,
             selected_home_item: 0,
@@ -196,7 +196,9 @@ impl Default for App {
             service_name_input: String::new(),
             services_assign_cursor: 0,
             secret_store: default_secret_store(),
-        }
+        };
+        app.sync_service_statuses();
+        app
     }
 }
 
@@ -598,6 +600,7 @@ impl App {
         if self.service_registry.add(record).is_ok() {
             self.selected_detail_item = self.service_registry.services().len() - 1;
         }
+        self.sync_service_statuses();
         self.services_phase = ServicesPhase::List;
         self.service_name_input.clear();
     }
@@ -622,6 +625,7 @@ impl App {
             let service_id = svc.id.clone();
             let _ = self.service_registry.assign_combo(&service_id, combo_profile_id);
         }
+        self.sync_service_statuses();
         self.services_phase = ServicesPhase::List;
     }
 
@@ -643,6 +647,31 @@ impl App {
             if Instant::now() >= clear_at {
                 crate::delivery::schedule_clipboard_clear(0);
                 self.clipboard_clear_at = None;
+            }
+        }
+    }
+
+    /// Recompute each service's status from the secret store.
+    ///
+    /// Call after any operation that may change which secrets exist or which
+    /// combo profile is assigned to a service.
+    pub fn sync_service_statuses(&mut self) {
+        let ids_and_combos: Vec<(ServiceId, bool)> = self
+            .service_registry
+            .services()
+            .iter()
+            .map(|s| (s.id.clone(), s.combo_profile_id.is_some()))
+            .collect();
+        for (id, has_combo) in ids_and_combos {
+            let status = if !has_combo {
+                ServiceStatus::Unassigned
+            } else if self.secret_store.contains_secret(&id) {
+                ServiceStatus::Ready
+            } else {
+                ServiceStatus::MissingSecret
+            };
+            if let Some(svc) = self.service_registry.get_mut(&id) {
+                svc.status = status;
             }
         }
     }
@@ -720,7 +749,7 @@ mod tests {
     use super::{gaps_pass_tolerance, App, RecordPhase, Screen, ServicesPhase, UNLOCK_TIMEOUT_SECS};
     use crate::activation::ActivationResult;
     use crate::profile::{ComboProfile, ComboProfileId};
-    use crate::service::ServiceId;
+    use crate::service::{ServiceId, ServiceStatus};
 
     // --- navigation ---
 
@@ -1378,6 +1407,67 @@ mod tests {
         assert!(app.unlock_time.is_some());
         app.next_screen();
         assert!(app.unlock_time.is_none());
+    }
+
+    // --- service status sync ---
+
+    #[test]
+    fn default_services_with_secrets_are_ready() {
+        let app = App::default();
+        for svc in app.service_registry.services() {
+            // all demo services have secrets and combo profiles pre-assigned
+            assert_eq!(svc.status, ServiceStatus::Ready, "{} should be Ready", svc.id.0);
+        }
+    }
+
+    #[test]
+    fn new_service_has_unassigned_status() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.start_add_service();
+        for ch in "NewSvc".chars() { app.service_name_push_char(ch); }
+        app.save_new_service();
+        let svc = app.service_registry.services().last().unwrap();
+        assert_eq!(svc.status, ServiceStatus::Unassigned);
+    }
+
+    #[test]
+    fn assigning_combo_without_secret_marks_missing_secret() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        // Add a fresh service with no secret in the store
+        app.start_add_service();
+        for ch in "Orphan".chars() { app.service_name_push_char(ch); }
+        app.save_new_service();
+        let idx = app.service_registry.services().len() - 1;
+        let orphan_id = app.service_registry.services()[idx].id.clone();
+        // Assign via registry directly (all default profiles are taken)
+        let fresh_combo = ComboProfileId("orphan-combo".to_owned());
+        app.service_registry.assign_combo(&orphan_id, fresh_combo).unwrap();
+        app.sync_service_statuses();
+        assert_eq!(
+            app.service_registry.services()[idx].status,
+            ServiceStatus::MissingSecret
+        );
+    }
+
+    #[test]
+    fn sync_flips_ready_to_missing_when_secret_removed() {
+        use crate::vault::SecretStore;
+        let mut app = App::default();
+        // GitHub is Ready initially
+        let gh_id = crate::service::ServiceId("github".to_owned());
+        assert_eq!(
+            app.service_registry.get(&gh_id).unwrap().status,
+            ServiceStatus::Ready
+        );
+        // Remove its secret and resync
+        app.secret_store.delete_secret(&gh_id).unwrap();
+        app.sync_service_statuses();
+        assert_eq!(
+            app.service_registry.get(&gh_id).unwrap().status,
+            ServiceStatus::MissingSecret
+        );
     }
 
     // --- quick launch ---
