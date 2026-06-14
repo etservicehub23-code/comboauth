@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::service::ServiceId;
 use super::{SecretMaterial, SecretStore, SecretStoreError};
 
+#[derive(Debug)]
 pub struct MockSecretStore {
     entries: HashMap<ServiceId, SecretMaterial>,
 }

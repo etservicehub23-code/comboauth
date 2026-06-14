@@ -230,6 +230,8 @@ dependencies = [
  "crossterm",
  "oo7",
  "ratatui",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "zeroize",

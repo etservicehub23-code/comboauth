@@ -1,5 +1,6 @@
 mod activation;
 mod delivery;
+mod persistence;
 mod service;
 mod app;
 mod profile;
@@ -23,9 +24,23 @@ use ratatui::backend::CrosstermBackend;
 
 fn main() -> Result<()> {
     let mut terminal = init_terminal()?;
-    let app_result = run_app(&mut terminal, App::default());
+    let app = build_app();
+    let app_result = run_app(&mut terminal, app);
     restore_terminal(&mut terminal)?;
     app_result
+}
+
+fn build_app() -> App {
+    #[cfg(target_os = "linux")]
+    {
+        use vault::linux_oo7::OsPersistenceStore;
+        // Use OS keychain for profile/registry persistence.
+        // Credential store wiring is a subsequent M8 sub-step.
+        if let Ok(persist) = OsPersistenceStore::new() {
+            return App::with_persistence(Box::new(persist));
+        }
+    }
+    App::default()
 }
 
 fn init_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {

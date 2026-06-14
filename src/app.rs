@@ -4,6 +4,7 @@ use crate::activation::ActivationResult;
 use crate::combo::Combo;
 pub use crate::profile::{ComboProfile, ComboProfileId};
 use crate::service::{ServiceId, ServiceRecord, ServiceRegistry, ServiceStatus};
+use crate::persistence::{MockPersistenceStore, PersistenceStore};
 use crate::vault::mock::MockSecretStore;
 use crate::vault::{SecretMaterial, SecretStore};
 use crate::delivery::{ClipboardSink, SecretSink, CLIPBOARD_TIMEOUT_SECS};
@@ -36,6 +37,7 @@ pub struct App {
     pub service_name_input: String,
     pub services_assign_cursor: usize,
     secret_store: MockSecretStore,
+    pub persist_store: Box<dyn PersistenceStore>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -196,6 +198,7 @@ impl Default for App {
             service_name_input: String::new(),
             services_assign_cursor: 0,
             secret_store: default_secret_store(),
+            persist_store: Box::new(MockPersistenceStore::new()),
         };
         app.sync_service_statuses();
         app
@@ -203,6 +206,95 @@ impl Default for App {
 }
 
 impl App {
+    /// Construct App loading state from `store`. On first run (empty store) falls back
+    /// to the hardcoded demo data so the TUI is still usable.
+    pub fn with_persistence(mut store: Box<dyn PersistenceStore>) -> Self {
+        let loaded_profiles = store.load_profiles().unwrap_or_default();
+        let loaded_registry = store.load_registry().unwrap_or_default();
+
+        let (combo_profiles, service_registry) = if loaded_profiles.is_empty() && loaded_registry.services().is_empty() {
+            // First run: use demo data and persist it so subsequent launches load correctly.
+            let demo_profiles = App::demo_profiles();
+            let demo_registry = default_service_registry();
+            for p in &demo_profiles {
+                let _ = store.save_profile(p);
+            }
+            let _ = store.save_registry(&demo_registry);
+            (demo_profiles, demo_registry)
+        } else {
+            (loaded_profiles, loaded_registry)
+        };
+
+        let mut app = App {
+            should_quit: false,
+            current_screen: Screen::Home,
+            selected_home_item: 0,
+            selected_detail_item: 0,
+            home_items: vec![
+                Screen::Services,
+                Screen::Combos,
+                Screen::TestLab,
+                Screen::Settings,
+                Screen::Quit,
+            ],
+            service_registry,
+            combo_profiles,
+            settings: vec![
+                SettingEntry { name: "Timing Tolerance", value: "40%" },
+                SettingEntry { name: "Theme", value: "terminal default" },
+                SettingEntry { name: "Secret Handling", value: "OS keychain" },
+            ],
+            demo_combo: Combo::parse("down right A"),
+            recorded_combo_tokens: Vec::new(),
+            recorded_timestamps: Vec::new(),
+            timing_tolerance_pct: 40,
+            last_activation: ActivationResult::Waiting,
+            unlock_time: None,
+            clipboard_clear_at: None,
+            quick_launch_open: false,
+            quick_launch_tokens: Vec::new(),
+            quick_launch_timestamps: Vec::new(),
+            record_phase: RecordPhase::NameEntry,
+            record_name_input: String::new(),
+            services_phase: ServicesPhase::List,
+            service_name_input: String::new(),
+            services_assign_cursor: 0,
+            secret_store: default_secret_store(),
+            persist_store: store,
+        };
+        app.sync_service_statuses();
+        app
+    }
+
+    fn demo_profiles() -> Vec<ComboProfile> {
+        vec![
+            ComboProfile {
+                id: ComboProfileId("quarter-turn".to_owned()),
+                name: "Quarter Turn".to_owned(),
+                sequence: "down right A".to_owned(),
+                status: "parsed".to_owned(),
+                timing_window_ms: 300,
+                gaps_ms: vec![],
+            },
+            ComboProfile {
+                id: ComboProfileId("dash-confirm".to_owned()),
+                name: "Dash Confirm".to_owned(),
+                sequence: "left right B".to_owned(),
+                status: "mock".to_owned(),
+                timing_window_ms: 400,
+                gaps_ms: vec![],
+            },
+            ComboProfile {
+                id: ComboProfileId("focus-reset".to_owned()),
+                name: "Focus Reset".to_owned(),
+                sequence: "up down X".to_owned(),
+                status: "mock".to_owned(),
+                timing_window_ms: 500,
+                gaps_ms: vec![],
+            },
+        ]
+    }
+
     pub fn quit(&mut self) {
         self.should_quit = true;
     }
@@ -536,14 +628,16 @@ impl App {
         let sequence = self.recorded_combo_tokens.join(" ");
         let gaps = self.recorded_gaps_ms();
         let id = ComboProfileId(name.to_lowercase().replace(' ', "-"));
-        self.combo_profiles.push(ComboProfile {
+        let profile = ComboProfile {
             id,
             name,
             sequence,
             status: "recorded".to_owned(),
             timing_window_ms: 500,
             gaps_ms: gaps,
-        });
+        };
+        let _ = self.persist_store.save_profile(&profile);
+        self.combo_profiles.push(profile);
         let last = self.combo_profiles.len() - 1;
         self.selected_detail_item = last;
         self.cancel_record_combo_inner(Screen::Combos);
@@ -601,6 +695,7 @@ impl App {
             self.selected_detail_item = self.service_registry.services().len() - 1;
         }
         self.sync_service_statuses();
+        let _ = self.persist_store.save_registry(&self.service_registry);
         self.services_phase = ServicesPhase::List;
         self.service_name_input.clear();
     }
@@ -626,6 +721,7 @@ impl App {
             let _ = self.service_registry.assign_combo(&service_id, combo_profile_id);
         }
         self.sync_service_statuses();
+        let _ = self.persist_store.save_registry(&self.service_registry);
         self.services_phase = ServicesPhase::List;
     }
 
