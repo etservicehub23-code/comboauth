@@ -54,11 +54,19 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         .map(|combo| format!("Demo combo loaded: {} steps.", combo.steps().len()))
         .unwrap_or_else(|| "No demo combo loaded.".to_string());
 
-    let help = Paragraph::new(format!(
-        "{demo_combo} Up/Down: select. Enter: open. Left/Right: screens. Esc: home. Ctrl-K: quick launch. q: quit."
-    ))
-    .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::ALL));
+    let status_text = if let Some(secs) = app.clipboard_secs_remaining() {
+        format!("Clipboard clears in {secs}s  |  {demo_combo}")
+    } else {
+        format!("{demo_combo} Up/Down: select. Enter: open. Left/Right: screens. Esc: home. Ctrl-K: quick launch. q: quit.")
+    };
+    let status_style = if app.clipboard_secs_remaining().is_some() {
+        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    let help = Paragraph::new(Line::from(Span::styled(status_text, status_style)))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::ALL));
     frame.render_widget(help, chunks[2]);
 
     if app.quick_launch_open {
