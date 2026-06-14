@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 
 pub mod mock;
+#[cfg(target_os = "linux")]
+pub mod linux_oo7;
 
 use crate::service::ServiceId;
 use zeroize::{Zeroize, ZeroizeOnDrop};

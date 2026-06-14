@@ -281,10 +281,16 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             "Enter your combo, then press Enter.",
             Style::default().fg(Color::DarkGray),
         )),
-        ActivationResult::Activated { service_name, .. } => Line::from(Span::styled(
-            format!("Activated: {service_name}"),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-        )),
+        ActivationResult::Activated { service_name, .. } => {
+            let label = match app.clipboard_secs_remaining() {
+                Some(n) => format!("Activated: {service_name} — clipboard clears in {n}s"),
+                None => format!("Activated: {service_name} — copied to clipboard"),
+            };
+            Line::from(Span::styled(
+                label,
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            ))
+        }
         ActivationResult::NoMatch => Line::from(Span::styled(
             "No match — unrecognised combo.",
             Style::default().fg(Color::Red),

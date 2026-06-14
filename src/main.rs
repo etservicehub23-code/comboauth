@@ -1,4 +1,5 @@
 mod activation;
+mod delivery;
 mod service;
 mod app;
 mod profile;
