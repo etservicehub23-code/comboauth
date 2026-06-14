@@ -3,6 +3,8 @@
 pub mod mock;
 #[cfg(target_os = "linux")]
 pub mod linux_oo7;
+#[cfg(all(target_os = "macos", feature = "macos-keychain"))]
+pub mod macos_keychain;
 
 use crate::service::ServiceId;
 use zeroize::{Zeroize, ZeroizeOnDrop};
