@@ -39,3 +39,11 @@ cargo test
 ## Direction
 
 The safest path is to treat combo input as a user-interface layer first, not as the cryptographic secret itself. Later milestones should add threat modeling, OS keychain integration, and external security review before any real secrets are handled.
+## Security Model
+
+ComboAuth is not protection against malware, keyloggers, or a compromised machine.
+It is a muscle-memory UX layer over the OS keychain — designed for convenience and shoulder-surfing resistance, not cryptographic security.
+
+Secrets are stored in the native OS keychain (GNOME Keyring on Linux, Keychain on macOS).
+Combo sequences are never written to disk. The audit log records activation events by service name only — no secret bytes, no combo input.
+Clipboard content is automatically cleared after 10 seconds.
