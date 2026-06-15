@@ -66,7 +66,7 @@ pub fn schedule_clipboard_clear(delay_secs: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(delay_secs));
         // wl-copy --clear is the canonical Wayland way
-        if Command::new("wl-copy").arg("--clear").status().is_ok() {
+        if Command::new("wl-copy").arg("--clear").status().map(|s| s.success()).unwrap_or(false) {
             return;
         }
         // X11 fallback: overwrite with empty string

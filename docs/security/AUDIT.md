@@ -58,3 +58,18 @@ Baseline: 104 tests passing, 2 ignored (Secret Service integration).
 - Fixed: `render_test_lab` — replaced `recorded_combo_input()` raw token echo with `"{token_count} steps captured"` count-only display (`src/ui.rs:280-287`). Entry is now genuinely non-echoing, consistent with the "blind combo entry" title.
 - Accepted risk: Services list username exposure — usernames are not cryptographic material; displaying them is consistent with the management-screen purpose.
 - Deferred: Add Ratatui buffer regression tests that assert sentinel token strings never appear in rendered output for any screen.
+
+## Phase 4 — Delivery mechanisms
+
+### Findings
+- [INFO] `ClipboardSink` correctly pipes secret bytes via stdin, not CLI arguments — no /proc/pid/cmdline or `ps` leakage risk — `src/delivery.rs:33,36,83`
+- [HIGH] `schedule_clipboard_clear` used `status().is_ok()` which returns `Ok` on any successful spawn+wait, even if `wl-copy --clear` exits nonzero. A failed clear would return early, skipping the `xclip` fallback, leaving the secret in the clipboard indefinitely — `src/delivery.rs:69` (pre-fix)
+- [HIGH] `schedule_clipboard_clear` spawns a fully detached thread with no join handle and discards all return values. If the thread panics (e.g., during `pipe_to`) or the process exits before the timer fires, clipboard is never cleared — `src/delivery.rs:65-75`
+- [INFO] `StdoutSink` writes raw secret bytes to stdout — acceptable only for askpass/credential-helper contexts, but not gated by CLI flag; caller context must ensure stdout is not captured by logs, CI, or shell wrappers — `src/delivery.rs:49`
+- [INFO] If both `wl-copy` and `xclip` are absent, `ClipboardSink.deliver` correctly returns `DeliveryError::NoTool` — `src/delivery.rs:81`
+
+### Actions taken
+- Fixed: `delivery.rs:69` — changed `status().is_ok()` to `status().map(|s| s.success()).unwrap_or(false)`. A nonzero `wl-copy --clear` exit now falls through to the `xclip` fallback instead of silently returning success.
+- Accepted risk: Detached clear thread with no panic recovery — converting to a tracked `JoinHandle` would require `App` to store it, complicating the ownership model. The 10s window is a best-effort UX guarantee, not a hard cryptographic guarantee; the threat model notes clipboard management is out of scope for adversaries with local access.
+- Accepted risk: `StdoutSink` stdout exposure — by-design surface for git-askpass integration; callers must opt in deliberately.
+- Deferred: Add integration tests with fake `wl-copy`/`xclip` binaries verifying secret goes to stdin (never argv) and that clear falls back correctly.
