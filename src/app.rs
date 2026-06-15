@@ -210,11 +210,18 @@ impl App {
     /// Construct App loading state from `store`. On first run (empty store) falls back
     /// to the hardcoded demo data so the TUI is still usable.
     pub fn with_persistence(mut store: Box<dyn PersistenceStore>) -> Self {
-        let loaded_profiles = store.load_profiles().unwrap_or_default();
-        let loaded_registry = store.load_registry().unwrap_or_default();
+        let profiles_result = store.load_profiles();
+        let registry_result = store.load_registry();
+        let load_error = profiles_result.is_err() || registry_result.is_err();
+        let loaded_profiles = profiles_result.unwrap_or_default();
+        let loaded_registry = registry_result.unwrap_or_default();
 
-        let (combo_profiles, service_registry) = if loaded_profiles.is_empty() && loaded_registry.services().is_empty() {
-            // First run: use demo data and persist it so subsequent launches load correctly.
+        let (combo_profiles, service_registry) = if load_error {
+            // Load error (corruption/tamper): fall back to demo data in-memory only;
+            // do not write to the store so recoverable keychain data is preserved.
+            (App::demo_profiles(), default_service_registry())
+        } else if loaded_profiles.is_empty() && loaded_registry.services().is_empty() {
+            // First run: persist demo data so subsequent launches load correctly.
             let demo_profiles = App::demo_profiles();
             let demo_registry = default_service_registry();
             for p in &demo_profiles {

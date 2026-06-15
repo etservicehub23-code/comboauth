@@ -22,3 +22,23 @@ Baseline: 104 tests passing, 2 ignored (Secret Service integration).
 - Fixed: `mock.rs:8` — removed `#[derive(Debug)]` from `MockSecretStore`; replaced with manual `Debug` impl that emits only `entries_count` and `..`.
 - Accepted risk: Long-lived `MockSecretStore` in `App` — this is the mock/demo store; real production path will inject `Box<dyn SecretStore>` backed by the OS keyring (deferred WIP).
 - Deferred: `App::with_persistence()` using mock secrets — tracked WIP in `main.rs`; out of scope for this audit cycle.
+
+## Phase 2 — Persistence layer
+
+### Findings
+
+- [HIGH] `App::with_persistence()` swallows load errors via `.unwrap_or_default()`, causing a corrupted/tampered keychain to look like "first run" and overwrite the store with demo data — `src/app.rs:212-214`
+- [MEDIUM] `ServiceRegistryDto` → `ServiceRegistry` used infallible `From`, ignoring `schema_version`; profiles validated schema but registry did not — `src/persistence.rs:122`
+- [HIGH] `oo7::Keyring::new()` auto-selects an encrypted file backend when running sandboxed (Flatpak/portal), writing a keyring blob to `$XDG_DATA_HOME/keyrings/…` with temp `.tmpkeyring…` files. Not plaintext, but violates "never flat files" intent and leaks write-cadence metadata — `src/vault/linux_oo7.rs:40`
+- [INFO] `put_item` passes `replace=true` to `create_item`, making overwrites idempotent by contract; backed by oo7's `remove_items` + push in the file backend and the D-Bus `replace` flag. Correct but untested by an integration test — `src/vault/linux_oo7.rs:118`
+- [INFO] Save errors (save_profile, save_registry) are discarded with `let _ =` at `app.rs:653`, `712`, `738`. UI state can diverge from durable store on write failure.
+- [INFO] macOS `macos_keychain.rs` implements `SecretStore` only; no `PersistenceStore` impl exists for macOS — `src/vault/macos_keychain.rs`
+
+### Actions taken
+
+- Fixed: `persistence.rs:122` — changed `From<ServiceRegistryDto>` to `TryFrom<ServiceRegistryDto>` with `schema_version` guard; added `service_registry_dto_rejects_wrong_schema_version` test.
+- Fixed: `vault/linux_oo7.rs:load_registry()` — updated call site to `ServiceRegistry::try_from(dto)?` to propagate schema errors.
+- Fixed: `app.rs:with_persistence()` — track `profiles_result.is_err() || registry_result.is_err()`; on error fall back to in-memory demo data without writing to the store, so recoverable keychain data is not overwritten.
+- Accepted risk: oo7 file backend — ComboAuth is not expected to run inside Flatpak; non-sandboxed Linux uses D-Bus Secret Service only. Deferred to a dedicated sandboxing policy decision.
+- Accepted risk: save-error discards — TUI cannot surface modal errors during keypress handlers; divergence is visible on next launch (reload shows old data). Deferred.
+- Deferred: macOS `OsPersistenceStore` — tracked WIP; out of scope for this audit cycle.

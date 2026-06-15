@@ -62,6 +62,18 @@ impl TryFrom<ComboProfileDto> for ComboProfile {
     type Error = PersistenceError;
 
     fn try_from(dto: ComboProfileDto) -> Result<Self, Self::Error> {
+        if dto.schema_version != SCHEMA_VERSION {
+            return Err(PersistenceError::Serialize(format!(
+                "unsupported schema_version: {}",
+                dto.schema_version
+            )));
+        }
+        if dto.id.is_empty() {
+            return Err(PersistenceError::Serialize("profile id is empty".into()));
+        }
+        if dto.sequence.is_empty() {
+            return Err(PersistenceError::Serialize("sequence is empty".into()));
+        }
         Ok(ComboProfile {
             id: ComboProfileId(dto.id),
             name: dto.name,
@@ -107,9 +119,19 @@ impl From<&ServiceRegistry> for ServiceRegistryDto {
     }
 }
 
-impl From<ServiceRegistryDto> for ServiceRegistry {
-    fn from(dto: ServiceRegistryDto) -> Self {
-        ServiceRegistry::new(dto.services.into_iter().map(ServiceRecord::from).collect())
+impl TryFrom<ServiceRegistryDto> for ServiceRegistry {
+    type Error = PersistenceError;
+
+    fn try_from(dto: ServiceRegistryDto) -> Result<Self, Self::Error> {
+        if dto.schema_version != SCHEMA_VERSION {
+            return Err(PersistenceError::Serialize(format!(
+                "unsupported registry schema_version: {}",
+                dto.schema_version
+            )));
+        }
+        Ok(ServiceRegistry::new(
+            dto.services.into_iter().map(ServiceRecord::from).collect(),
+        ))
     }
 }
 
@@ -264,8 +286,46 @@ mod tests {
         let dto = ServiceRegistryDto::from(&reg);
         let json = serde_json::to_string(&dto).unwrap();
         let decoded: ServiceRegistryDto = serde_json::from_str(&json).unwrap();
-        let restored = ServiceRegistry::from(decoded);
+        let restored = ServiceRegistry::try_from(decoded).unwrap();
         assert_eq!(restored.services().len(), 1);
         assert_eq!(restored.services()[0].id, ServiceId("svc-1".to_owned()));
+    }
+
+    #[test]
+    fn service_registry_dto_rejects_wrong_schema_version() {
+        let json = r#"{"schema_version":99,"services":[]}"#;
+        let dto: ServiceRegistryDto = serde_json::from_str(json).unwrap();
+        let err = ServiceRegistry::try_from(dto).unwrap_err();
+        assert!(matches!(err, PersistenceError::Serialize(_)));
+    }
+
+    #[test]
+    fn combo_profile_dto_rejects_wrong_schema_version() {
+        let json = r#"{"schema_version":99,"id":"p1","name":"P","sequence":"down right A","status":"recorded","timing_window_ms":300,"gaps_ms":[100,80]}"#;
+        let dto: ComboProfileDto = serde_json::from_str(json).unwrap();
+        let err = ComboProfile::try_from(dto).unwrap_err();
+        assert!(matches!(err, PersistenceError::Serialize(_)));
+    }
+
+    #[test]
+    fn combo_profile_dto_rejects_empty_sequence() {
+        let json = r#"{"schema_version":1,"id":"p1","name":"P","sequence":"","status":"recorded","timing_window_ms":300,"gaps_ms":[]}"#;
+        let dto: ComboProfileDto = serde_json::from_str(json).unwrap();
+        let err = ComboProfile::try_from(dto).unwrap_err();
+        assert!(matches!(err, PersistenceError::Serialize(_)));
+    }
+
+    #[test]
+    fn combo_profile_dto_rejects_empty_id() {
+        let json = r#"{"schema_version":1,"id":"","name":"P","sequence":"down right A","status":"recorded","timing_window_ms":300,"gaps_ms":[]}"#;
+        let dto: ComboProfileDto = serde_json::from_str(json).unwrap();
+        let err = ComboProfile::try_from(dto).unwrap_err();
+        assert!(matches!(err, PersistenceError::Serialize(_)));
+    }
+
+    #[test]
+    fn combo_profile_dto_truncated_json_returns_error() {
+        let truncated = r#"{"schema_version":1,"id":"p1","name":"P","sequence":"down"#;
+        assert!(serde_json::from_str::<ComboProfileDto>(truncated).is_err());
     }
 }

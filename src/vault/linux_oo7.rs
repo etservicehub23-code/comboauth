@@ -245,7 +245,7 @@ impl PersistenceStore for OsPersistenceStore {
             Ok(bytes) => {
                 let dto: ServiceRegistryDto = serde_json::from_slice(&bytes)
                     .map_err(|e| PersistenceError::Serialize(e.to_string()))?;
-                Ok(ServiceRegistry::from(dto))
+                Ok(ServiceRegistry::try_from(dto)?)
             }
             Err(SecretStoreError::NotFound) => Ok(ServiceRegistry::default()),
             Err(e) => Err(PersistenceError::Backend(e.to_string())),
