@@ -260,10 +260,11 @@ fn render_combos(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(index, combo)| {
+            let step_count = combo.sequence.split_whitespace().count();
             selectable_item(
                 index,
                 app.selected_detail_item,
-                format!("{} | {} | {}", combo.name, combo.sequence, combo.status),
+                format!("{} | {} steps | {}", combo.name, step_count, combo.status),
             )
         })
         .collect();
@@ -277,11 +278,14 @@ fn render_combos(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let recorded = app.recorded_combo_input();
-    let input_span = if recorded.is_empty() {
+    let token_count = app.recorded_combo_tokens.len();
+    let input_span = if token_count == 0 {
         Span::styled("(nothing yet)", Style::default().fg(Color::DarkGray))
     } else {
-        Span::styled(recorded, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Span::styled(
+            format!("{token_count} steps captured"),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )
     };
 
     let result_line = match &app.last_activation {

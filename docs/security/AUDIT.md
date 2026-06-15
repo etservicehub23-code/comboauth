@@ -42,3 +42,19 @@ Baseline: 104 tests passing, 2 ignored (Secret Service integration).
 - Accepted risk: oo7 file backend — ComboAuth is not expected to run inside Flatpak; non-sandboxed Linux uses D-Bus Secret Service only. Deferred to a dedicated sandboxing policy decision.
 - Accepted risk: save-error discards — TUI cannot surface modal errors during keypress handlers; divergence is visible on next launch (reload shows old data). Deferred.
 - Deferred: macOS `OsPersistenceStore` — tracked WIP; out of scope for this audit cycle.
+
+## Phase 3 — UI/Rendering
+
+### Findings
+- [HIGH] `render_combos` rendered full combo sequence tokens in list labels — `src/ui.rs:266` (pre-fix). An observer of the Combos screen learned the exact token pattern for every credential, enabling replay attacks without knowing the timing.
+- [INFO] Test Lab echoed live entered tokens via `recorded_combo_input()` — `src/ui.rs:280-284`, `src/ui.rs:328`, `src/app.rs:574-575`. Screen title says "blind combo entry" but raw token strings were visible while typing; shoulder-surfing could capture the full sequence.
+- [INFO] Services list exposes usernames — `src/ui.rs:167`. `format!("{} | user: {} | {}", service.name, user, service.status.label())` — not a secret, but account metadata visible to anyone viewing the Services screen.
+- [INFO] Ctrl-K overlay is clean — `src/ui.rs:108-129`. Shows only step count, never raw tokens.
+- [INFO] Sidebar is clean — `src/ui.rs:83`. Shows only `{name} [{status_label}]`.
+- [INFO] Status bar countdown is clean — `src/ui.rs:57-58`. Shows only seconds remaining and demo step count.
+
+### Actions taken
+- Fixed: `render_combos` — replaced `combo.sequence` with `combo.sequence.split_whitespace().count()` step count summary (`src/ui.rs:263-268`). Combo patterns no longer appear in any rendered widget.
+- Fixed: `render_test_lab` — replaced `recorded_combo_input()` raw token echo with `"{token_count} steps captured"` count-only display (`src/ui.rs:280-287`). Entry is now genuinely non-echoing, consistent with the "blind combo entry" title.
+- Accepted risk: Services list username exposure — usernames are not cryptographic material; displaying them is consistent with the management-screen purpose.
+- Deferred: Add Ratatui buffer regression tests that assert sentinel token strings never appear in rendered output for any screen.
