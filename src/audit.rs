@@ -8,6 +8,14 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Strip control characters (including newlines and ANSI escapes) from log field values.
+/// Keeps printable ASCII (0x20-0x7E) and replaces everything else with '_'.
+fn sanitize_log_value(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii() && !c.is_ascii_control() { c } else { '_' })
+        .collect()
+}
+
 pub enum AuditEvent<'a> {
     Activated { service_name: &'a str, delivery_mode: &'a str },
     Failed { reason: FailReason },
@@ -33,17 +41,30 @@ impl FailReason {
 pub fn log(event: AuditEvent<'_>) {
     let Some(path) = log_path() else { return };
     let Some(dir) = path.parent() else { return };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        if fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).is_err() { return; }
+    }
+    #[cfg(not(unix))]
     if fs::create_dir_all(dir).is_err() { return; }
 
     let ts = iso8601_now();
     let line = match event {
         AuditEvent::Activated { service_name, delivery_mode } =>
-            format!("{ts} ACTIVATED service={service_name} delivery={delivery_mode}\n"),
+            format!("{ts} ACTIVATED service={} delivery={}\n", sanitize_log_value(service_name), sanitize_log_value(delivery_mode)),
         AuditEvent::Failed { reason } =>
             format!("{ts} FAILED reason={}\n", reason.as_str()),
     };
 
-    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+    #[cfg(unix)]
+    let file_result = {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new().create(true).append(true).mode(0o600).open(&path)
+    };
+    #[cfg(not(unix))]
+    let file_result = OpenOptions::new().create(true).append(true).open(&path);
+    if let Ok(mut f) = file_result {
         let _ = f.write_all(line.as_bytes());
     }
 }
@@ -126,5 +147,28 @@ mod tests {
         assert_eq!(FailReason::NoMatch.as_str(), "NoMatch");
         assert_eq!(FailReason::TimingMismatch.as_str(), "TimingMismatch");
         assert_eq!(FailReason::SecretUnavailable.as_str(), "SecretUnavailable");
+    }
+
+    #[test]
+    fn sanitize_blocks_newline_injection() {
+        let injected = "legit\nFAKE ACTIVATED service=evil delivery=clipboard";
+        let sanitized = sanitize_log_value(injected);
+        assert!(!sanitized.contains('\n'));
+        assert!(sanitized.contains('_'));
+    }
+
+    #[test]
+    fn sanitize_blocks_ansi_escape() {
+        // ESC char (0x1B) followed by "[2J"
+        let injected = "name\x1b[2Jsuffix";
+        let sanitized = sanitize_log_value(injected);
+        assert!(!sanitized.contains('\x1b'));
+        assert_eq!(sanitized, "name_[2Jsuffix");
+    }
+
+    #[test]
+    fn sanitize_passes_normal_names() {
+        let name = "GitHub (work)";
+        assert_eq!(sanitize_log_value(name), name);
     }
 }

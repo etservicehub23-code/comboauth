@@ -73,3 +73,19 @@ Baseline: 104 tests passing, 2 ignored (Secret Service integration).
 - Accepted risk: Detached clear thread with no panic recovery — converting to a tracked `JoinHandle` would require `App` to store it, complicating the ownership model. The 10s window is a best-effort UX guarantee, not a hard cryptographic guarantee; the threat model notes clipboard management is out of scope for adversaries with local access.
 - Accepted risk: `StdoutSink` stdout exposure — by-design surface for git-askpass integration; callers must opt in deliberately.
 - Deferred: Add integration tests with fake `wl-copy`/`xclip` binaries verifying secret goes to stdin (never argv) and that clear falls back correctly.
+
+## Phase 5 — Audit log
+
+### Findings
+- [HIGH] `service_name` written raw into log line with no control-character sanitization — a crafted name with `\n`, `\r`, or ANSI escape bytes can forge log entries or corrupt terminal display — `src/audit.rs:41` (pre-fix)
+- [HIGH] Log file created with `OpenOptions::new().create(true).append(true)` — no explicit mode set, so permissions depend on process umask and may produce a world/group-readable file — `src/audit.rs:46` (pre-fix)
+- [INFO] `delivery_mode` is always a hardcoded string literal (`"clipboard"`) at all call sites — no injection risk in practice, but still benefits from sanitization defensively — `src/app.rs:497`, `src/app.rs:555`
+- [INFO] macOS log path falls back to `~/.local/share/comboauth/audit.log` via the XDG path, which is non-standard on macOS (expected: `~/Library/Application Support`) — `src/audit.rs:51-61`
+- [INFO] No combo sequence or secret bytes can appear in log lines: `Failed` events use a closed enum, `Activated` events include only service name and delivery mode (both now sanitized) — verified
+
+### Actions taken
+- Fixed: Added `sanitize_log_value()` in `src/audit.rs:13-17` — strips all characters outside printable ASCII (0x20–0x7E) by replacing with `_`. Applied to both `service_name` and `delivery_mode` in `log()`.
+- Fixed: Log directory created via `DirBuilder::mode(0o700)` on Unix (`src/audit.rs:44-50`); log file opened with `OpenOptionsExt::mode(0o600)` on Unix (`src/audit.rs:60-66`). Non-Unix paths retain `create_dir_all` / default-mode behavior.
+- Fixed: Added three tests — `sanitize_blocks_newline_injection`, `sanitize_blocks_ansi_escape`, `sanitize_passes_normal_names` — verifying sanitization correctness.
+- Accepted risk: `delivery_mode` sanitization — the string is always a literal in the codebase; sanitization added for defense-in-depth, not urgency.
+- Deferred: macOS log path (`~/Library/Application Support`) — deferred alongside the broader macOS platform dispatch (Phase 8).
