@@ -5,9 +5,16 @@ use std::collections::HashMap;
 use crate::service::ServiceId;
 use super::{SecretMaterial, SecretStore, SecretStoreError};
 
-#[derive(Debug)]
 pub struct MockSecretStore {
     entries: HashMap<ServiceId, SecretMaterial>,
+}
+
+impl std::fmt::Debug for MockSecretStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockSecretStore")
+            .field("entries_count", &self.entries.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl MockSecretStore {

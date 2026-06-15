@@ -69,7 +69,7 @@ impl SecretStore for OsSecretStore {
     ) -> Result<(), SecretStoreError> {
         let label = format!("comboauth:cred:{}", id.0);
         let sid = id.0.clone();
-        let bytes = secret.expose_bytes().to_vec();
+        let bytes = zeroize::Zeroizing::new(secret.expose_bytes().to_vec());
         self.rt
             .block_on(self.keyring.create_item(
                 &label,
