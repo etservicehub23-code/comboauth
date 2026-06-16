@@ -27,7 +27,7 @@ impl SecretStore for MacosKeychainStore {
         security_framework::passwords::get_generic_password(SERVICE_CRED, &id.0)
             .map(|bytes| SecretMaterial::new(bytes))
             .map_err(|e| {
-                if e.code() == security_framework_sys::base::errSecItemNotFound {
+                if e.code() == security_framework::base::errSecItemNotFound {
                     SecretStoreError::NotFound
                 } else {
                     SecretStoreError::Backend(e.to_string())
@@ -43,7 +43,7 @@ impl SecretStore for MacosKeychainStore {
     fn delete_secret(&mut self, id: &ServiceId) -> Result<(), SecretStoreError> {
         security_framework::passwords::delete_generic_password(SERVICE_CRED, &id.0)
             .map_err(|e| {
-                if e.code() == security_framework_sys::base::errSecItemNotFound {
+                if e.code() == security_framework::base::errSecItemNotFound {
                     SecretStoreError::NotFound
                 } else {
                     SecretStoreError::Backend(e.to_string())

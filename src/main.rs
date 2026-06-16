@@ -31,6 +31,7 @@ fn main() -> Result<()> {
     app_result
 }
 
+#[allow(unreachable_code)]
 fn build_app() -> App {
     #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
     {
