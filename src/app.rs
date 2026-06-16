@@ -11,6 +11,8 @@ use crate::delivery::{ClipboardSink, SecretSink, CLIPBOARD_TIMEOUT_SECS};
 use crate::audit::{self, AuditEvent, FailReason};
 
 pub const UNLOCK_TIMEOUT_SECS: u64 = 15;
+pub const MAX_FAILED_ATTEMPTS: u32 = 5;
+pub const LOCKOUT_SECS: u64 = 30;
 
 #[derive(Debug)]
 pub struct App {
@@ -29,6 +31,8 @@ pub struct App {
     pub last_activation: ActivationResult,
     pub unlock_time: Option<Instant>,
     pub clipboard_clear_at: Option<Instant>,
+    pub failed_attempts: u32,
+    pub locked_until: Option<Instant>,
     pub quick_launch_open: bool,
     pub quick_launch_tokens: Vec<String>,
     pub quick_launch_timestamps: Vec<Instant>,
@@ -190,6 +194,8 @@ impl Default for App {
             last_activation: ActivationResult::Waiting,
             unlock_time: None,
             clipboard_clear_at: None,
+            failed_attempts: 0,
+            locked_until: None,
             quick_launch_open: false,
             quick_launch_tokens: Vec::new(),
             quick_launch_timestamps: Vec::new(),
@@ -259,6 +265,8 @@ impl App {
             last_activation: ActivationResult::Waiting,
             unlock_time: None,
             clipboard_clear_at: None,
+            failed_attempts: 0,
+            locked_until: None,
             quick_launch_open: false,
             quick_launch_tokens: Vec::new(),
             quick_launch_timestamps: Vec::new(),
@@ -448,6 +456,17 @@ impl App {
     }
 
     pub fn test_recorded_combo(&mut self) {
+        // Lockout guard: clear input and block if too many recent failures
+        if let Some(until) = self.locked_until {
+            if Instant::now() < until {
+                self.recorded_combo_tokens.clear();
+                self.recorded_timestamps.clear();
+                self.last_activation = ActivationResult::Locked;
+                return;
+            }
+            self.locked_until = None;
+        }
+
         let Some(recorded) = Combo::parse(&self.recorded_combo_input()) else {
             self.recorded_combo_tokens.clear();
             self.recorded_timestamps.clear();
@@ -497,6 +516,7 @@ impl App {
                 audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
                 self.last_activation = ActivationResult::Activated { service_id, service_name };
                 self.unlock_time = Some(Instant::now());
+                self.failed_attempts = 0;
             } else {
                 let combo_name = self.combo_profiles.iter()
                     .find(|p| p.id == combo_profile_id)
@@ -510,18 +530,32 @@ impl App {
             audit::log(AuditEvent::Failed { reason: FailReason::TimingMismatch });
             self.last_activation = ActivationResult::TimingMismatch;
             self.unlock_time = None;
+            self.bump_failed_attempts();
         } else {
             audit::log(AuditEvent::Failed { reason: FailReason::NoMatch });
             self.last_activation = ActivationResult::NoMatch;
             self.unlock_time = None;
+            self.bump_failed_attempts();
         }
     }
 
     /// Attempt activation from the quick-launch overlay. Clears tokens regardless of outcome.
     pub fn activate_quick_launch(&mut self) {
+        // Lockout guard: clear input and block if too many recent failures
+        if let Some(until) = self.locked_until {
+            if Instant::now() < until {
+                self.quick_launch_tokens.clear();
+                self.quick_launch_timestamps.clear();
+                self.quick_launch_open = false;
+                self.last_activation = ActivationResult::Locked;
+                return;
+            }
+            self.locked_until = None;
+        }
+
         let input = self.quick_launch_tokens.join(" ");
+        let timestamps: Vec<Instant> = std::mem::take(&mut self.quick_launch_timestamps);
         self.quick_launch_tokens.clear();
-        self.quick_launch_timestamps.clear();
         self.quick_launch_open = false;
 
         let Some(recorded) = Combo::parse(&input) else {
@@ -529,10 +563,27 @@ impl App {
             return;
         };
 
+        // Compute inter-key gaps from captured timestamps
+        let test_gaps: Vec<u64> = timestamps
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]).as_millis() as u64)
+            .collect();
+
         let matched = self.combo_profiles.iter().find_map(|profile| {
             let expected = Combo::parse(&profile.sequence)?;
-            if recorded == expected { Some(profile.id.clone()) } else { None }
+            if recorded != expected { return None; }
+            let timing_ok = if profile.gaps_ms.is_empty() {
+                true
+            } else {
+                gaps_pass_tolerance(&test_gaps, &profile.gaps_ms, self.timing_tolerance_pct)
+            };
+            if timing_ok { Some(profile.id.clone()) } else { None }
         });
+
+        let sequence_matched_any = matched.is_none()
+            && self.combo_profiles.iter().any(|p| {
+                Combo::parse(&p.sequence).map(|e| recorded == e).unwrap_or(false)
+            });
 
         if let Some(combo_profile_id) = matched {
             let lookup = self
@@ -555,6 +606,7 @@ impl App {
                 audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
                 self.last_activation = ActivationResult::Activated { service_id, service_name };
                 self.unlock_time = Some(Instant::now());
+                self.failed_attempts = 0;
             } else {
                 let combo_name = self.combo_profiles.iter()
                     .find(|p| p.id == combo_profile_id)
@@ -564,10 +616,16 @@ impl App {
                     ActivationResult::NoServiceForCombo { combo_profile_id, combo_name };
                 self.unlock_time = None;
             }
+        } else if sequence_matched_any {
+            audit::log(AuditEvent::Failed { reason: FailReason::TimingMismatch });
+            self.last_activation = ActivationResult::TimingMismatch;
+            self.unlock_time = None;
+            self.bump_failed_attempts();
         } else {
             audit::log(AuditEvent::Failed { reason: FailReason::NoMatch });
             self.last_activation = ActivationResult::NoMatch;
             self.unlock_time = None;
+            self.bump_failed_attempts();
         }
     }
 
@@ -766,6 +824,12 @@ impl App {
                 self.clipboard_clear_at = None;
             }
         }
+        if let Some(until) = self.locked_until {
+            if Instant::now() >= until {
+                self.locked_until = None;
+                self.last_activation = ActivationResult::Waiting;
+            }
+        }
     }
 
     /// Recompute each service's status from the secret store.
@@ -810,6 +874,14 @@ impl App {
         self.unlock_time = None;
     }
 
+    fn bump_failed_attempts(&mut self) {
+        self.failed_attempts += 1;
+        if self.failed_attempts >= MAX_FAILED_ATTEMPTS {
+            self.locked_until = Some(Instant::now() + Duration::from_secs(LOCKOUT_SECS));
+            self.failed_attempts = 0;
+        }
+    }
+
     fn lock_on_exit(&mut self) {
         self.last_activation = ActivationResult::Waiting;
         self.unlock_time = None;
@@ -851,7 +923,7 @@ impl App {
 pub(crate) fn gaps_pass_tolerance(recorded: &[u64], expected: &[u64], tolerance_pct: u32) -> bool {
     if expected.is_empty() { return true; }
     if recorded.len() != expected.len() { return false; }
-    let tol = tolerance_pct as f64 / 100.0;
+    let tol = tolerance_pct.min(100) as f64 / 100.0;
     recorded.iter().zip(expected.iter()).all(|(&got, &exp)| {
         let lo = (exp as f64 * (1.0 - tol)) as u64;
         let hi = (exp as f64 * (1.0 + tol)) as u64;

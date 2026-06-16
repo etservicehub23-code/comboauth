@@ -323,6 +323,10 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             format!("Secret unavailable for: {service_name}"),
             Style::default().fg(Color::Red),
         )),
+        ActivationResult::Locked => Line::from(Span::styled(
+            "Too many failed attempts — locked out. Try again shortly.",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
     };
 
     let detail = Paragraph::new(vec![

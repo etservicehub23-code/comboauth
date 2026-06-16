@@ -89,3 +89,26 @@ Baseline: 104 tests passing, 2 ignored (Secret Service integration).
 - Fixed: Added three tests — `sanitize_blocks_newline_injection`, `sanitize_blocks_ansi_escape`, `sanitize_passes_normal_names` — verifying sanitization correctness.
 - Accepted risk: `delivery_mode` sanitization — the string is always a literal in the codebase; sanitization added for defense-in-depth, not urgency.
 - Deferred: macOS log path (`~/Library/Application Support`) — deferred alongside the broader macOS platform dispatch (Phase 8).
+
+## Phase 6 — Authentication logic
+
+### Findings
+- [HIGH] No brute-force protection — unlimited combo attempts with no lockout, counter, or delay after failures. Both `test_recorded_combo()` and `activate_quick_launch()` simply clear state and return, enabling rapid automated guessing — `src/app.rs:476,509,514,521,567,570`
+- [HIGH] `activate_quick_launch()` bypassed timing entirely — it used a sequence-only `find_map` with no `gaps_pass_tolerance` check, while `test_recorded_combo()` did enforce timing when `gaps_ms` is non-empty — `src/app.rs:532-534` (pre-fix)
+- [MEDIUM] `timing_tolerance_pct` (a `u32`) had no upper-bound guard: a value ≥ 100 produces `tol ≥ 1.0`, making `lo = 0` and `hi ≥ 2*expected`, which defeats rhythm matching entirely — `src/app.rs:854` (pre-fix)
+- [INFO] All three built-in demo profiles have `gaps_ms: vec![]`, so timing is always skipped for them — this is by design for the demo, but newly recorded profiles do capture gaps — `src/app.rs:277,285,293,301`, `src/app.rs:463`
+- [INFO] TUI accepts all Crossterm key events as trusted input with no paste/PTY origin guard. Rapid paste injection can supply tokens faster than a human, but the lockout and timing checks now bound the exploitation window — `src/main.rs:69,112,184`
+- [INFO] Lower-bound rounding in tolerance math: `lo = (exp * (1 - tol)) as u64` truncates instead of rounding, making the low side ~1ms more permissive than the nominal percentage. Not exploitable in practice.
+
+### Actions taken
+- Fixed: Added `MAX_FAILED_ATTEMPTS = 5` and `LOCKOUT_SECS = 30` constants; added `failed_attempts: u32` and `locked_until: Option<Instant>` fields to `App` — `src/app.rs:14-15,34-35`
+- Fixed: Added `bump_failed_attempts()` private helper that increments the counter and sets `locked_until` on threshold breach — `src/app.rs`
+- Fixed: Both `test_recorded_combo()` and `activate_quick_launch()` now check `locked_until` at entry and return `ActivationResult::Locked` immediately; on success, `failed_attempts` is reset to 0; on `NoMatch`/`TimingMismatch`, `bump_failed_attempts()` is called — `src/app.rs`
+- Fixed: `tick()` now clears `locked_until` and resets `last_activation` to `Waiting` when lockout expires — `src/app.rs`
+- Fixed: `activate_quick_launch()` now captures timestamps via `std::mem::take`, computes inter-key gaps, and passes them through the same `gaps_pass_tolerance` path as `test_recorded_combo()`. It also reports `TimingMismatch` when sequence matches but timing fails — `src/app.rs`
+- Fixed: `gaps_pass_tolerance` now clamps `tolerance_pct` to 100 before converting to float, preventing a `>100` value from making `lo = 0` and accepting arbitrarily fast inputs — `src/app.rs:854`
+- Fixed: Added `ActivationResult::Locked` variant and corresponding UI render arm — `src/activation.rs:19`, `src/ui.rs`
+- Accepted risk: Demo profiles have empty `gaps_ms` — intentional; timing is not enforced for demos. Users should record profiles with captured gaps for production use.
+- Accepted risk: Paste/PTY injection — inherent in TUI architecture; bounded by lockout after 5 failures in 30s. Full PTY-detection would require OS-level input classification.
+- Accepted risk: Lower-bound truncation — sub-millisecond drift, not exploitable.
+- Deferred: Add `failed_attempts_trigger_lockout_after_n_failures` and `quick_launch_rejects_sequence_with_bad_timing_when_profile_has_gaps` integration tests.

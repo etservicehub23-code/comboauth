@@ -16,6 +16,7 @@ pub enum ActivationResult {
     InvalidInput,
     NoMatch,
     TimingMismatch,
+    Locked,
     NoServiceForCombo {
         combo_profile_id: ComboProfileId,
         combo_name: String,
