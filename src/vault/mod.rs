@@ -36,7 +36,7 @@ pub enum SecretStoreError {
     Backend(String),
 }
 
-pub trait SecretStore {
+pub trait SecretStore: std::fmt::Debug {
     fn get_secret(&self, id: &ServiceId) -> Result<SecretMaterial, SecretStoreError>;
     fn put_secret(&mut self, id: ServiceId, secret: SecretMaterial) -> Result<(), SecretStoreError>;
     fn delete_secret(&mut self, id: &ServiceId) -> Result<(), SecretStoreError>;

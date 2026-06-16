@@ -41,7 +41,7 @@ pub struct App {
     pub services_phase: ServicesPhase,
     pub service_name_input: String,
     pub services_assign_cursor: usize,
-    secret_store: MockSecretStore,
+    secret_store: Box<dyn SecretStore>,
     pub persist_store: Box<dyn PersistenceStore>,
 }
 
@@ -118,7 +118,7 @@ fn default_service_registry() -> ServiceRegistry {
     ])
 }
 
-fn default_secret_store() -> MockSecretStore {
+fn default_secret_store() -> Box<dyn SecretStore> {
     let mut store = MockSecretStore::new();
     store
         .put_secret(
@@ -138,7 +138,7 @@ fn default_secret_store() -> MockSecretStore {
             SecretMaterial::new(b"***mock-lab-key-def456***".to_vec()),
         )
         .unwrap();
-    store
+    Box::new(store)
 }
 
 impl Default for App {
@@ -215,7 +215,7 @@ impl Default for App {
 impl App {
     /// Construct App loading state from `store`. On first run (empty store) falls back
     /// to the hardcoded demo data so the TUI is still usable.
-    pub fn with_persistence(mut store: Box<dyn PersistenceStore>) -> Self {
+    pub fn with_persistence(mut store: Box<dyn PersistenceStore>, secret_store: Box<dyn SecretStore>) -> Self {
         let profiles_result = store.load_profiles();
         let registry_result = store.load_registry();
         let load_error = profiles_result.is_err() || registry_result.is_err();
@@ -275,7 +275,7 @@ impl App {
             services_phase: ServicesPhase::List,
             service_name_input: String::new(),
             services_assign_cursor: 0,
-            secret_store: default_secret_store(),
+            secret_store,
             persist_store: store,
         };
         app.sync_service_statuses();
@@ -1648,7 +1648,6 @@ mod tests {
 
     #[test]
     fn sync_flips_ready_to_missing_when_secret_removed() {
-        use crate::vault::SecretStore;
         let mut app = App::default();
         // GitHub is Ready initially
         let gh_id = crate::service::ServiceId("github".to_owned());

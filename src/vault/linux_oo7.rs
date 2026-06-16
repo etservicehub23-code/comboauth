@@ -30,6 +30,12 @@ pub struct OsSecretStore {
     keyring: oo7::Keyring,
 }
 
+impl std::fmt::Debug for OsSecretStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OsSecretStore").finish_non_exhaustive()
+    }
+}
+
 impl OsSecretStore {
     pub fn new() -> Result<Self, SecretStoreError> {
         let rt = tokio::runtime::Builder::new_current_thread()

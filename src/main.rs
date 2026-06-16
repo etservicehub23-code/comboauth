@@ -32,15 +32,24 @@ fn main() -> Result<()> {
 }
 
 fn build_app() -> App {
+    #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
+    {
+        use vault::macos_keychain::{MacosKeychainStore, MacosPersistenceStore};
+        return App::with_persistence(
+            Box::new(MacosPersistenceStore::new()),
+            Box::new(MacosKeychainStore),
+        );
+    }
     #[cfg(target_os = "linux")]
     {
-        use vault::linux_oo7::OsPersistenceStore;
-        // Use OS keychain for profile/registry persistence.
-        // Credential store wiring is a subsequent M8 sub-step.
-        if let Ok(persist) = OsPersistenceStore::new() {
-            return App::with_persistence(Box::new(persist));
+        use vault::linux_oo7::{OsPersistenceStore, OsSecretStore};
+        let persist_result = OsPersistenceStore::new();
+        let secret_result = OsSecretStore::new();
+        if let (Ok(persist), Ok(secret)) = (persist_result, secret_result) {
+            return App::with_persistence(Box::new(persist), Box::new(secret));
         }
     }
+    eprintln!("comboauth: OS keychain unavailable — using in-memory mock stores");
     App::default()
 }
 

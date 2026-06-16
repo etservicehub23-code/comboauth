@@ -70,11 +70,19 @@ pub fn log(event: AuditEvent<'_>) {
 }
 
 fn log_path() -> Option<PathBuf> {
-    let base = std::env::var("XDG_DATA_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| dirs_next().map(|h| h.join(".local/share")))?;
-    Some(base.join("comboauth").join("audit.log"))
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").ok().map(PathBuf::from)?;
+        return Some(home.join("Library/Application Support/comboauth/audit.log"));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let base = std::env::var("XDG_DATA_HOME")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| dirs_next().map(|h| h.join(".local/share")))?;
+        Some(base.join("comboauth").join("audit.log"))
+    }
 }
 
 fn dirs_next() -> Option<PathBuf> {
