@@ -26,7 +26,7 @@
 
 ## What ComboAuth Protects Against
 
-- **Clipboard-free credential entry** — credentials are never copied to clipboard
+- **Clipboard auto-clear** — credentials written to the clipboard are automatically cleared after 10 seconds; the exposure window is bounded even if the user forgets to clear manually
 - **Shoulder surfing** — the actual credential is never shown; only masked combo tokens
 - **Frequent re-entry fatigue** — muscle-memory combo replaces typing long passwords repeatedly during dev sessions
 - **Accidental shoulder-surfing of the credential** — the OS keychain holds the secret; ComboAuth only gates retrieval
@@ -49,7 +49,7 @@ The security boundary is the **OS keychain** (Secret Service on Linux, Keychain 
 ComboAuth is a frontend that adds:
 1. A combo-gated UX layer on top of OS keychain access
 2. Auto-relock on inactivity
-3. Clipboard-free credential delivery
+3. Time-limited clipboard delivery (auto-cleared after 10 seconds)
 
 The OS is responsible for:
 1. Encrypting credentials at rest

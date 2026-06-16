@@ -512,6 +512,9 @@ impl App {
                     self.clipboard_clear_at = Some(
                         Instant::now() + Duration::from_secs(CLIPBOARD_TIMEOUT_SECS),
                     );
+                    // Spawn eager clear thread: ensures the clipboard is cleared even
+                    // if the process exits before the tick-driven clear fires.
+                    crate::delivery::schedule_clipboard_clear(CLIPBOARD_TIMEOUT_SECS);
                 }
                 audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
                 self.last_activation = ActivationResult::Activated { service_id, service_name };
@@ -602,6 +605,9 @@ impl App {
                     self.clipboard_clear_at = Some(
                         Instant::now() + Duration::from_secs(CLIPBOARD_TIMEOUT_SECS),
                     );
+                    // Spawn eager clear thread: ensures the clipboard is cleared even
+                    // if the process exits before the tick-driven clear fires.
+                    crate::delivery::schedule_clipboard_clear(CLIPBOARD_TIMEOUT_SECS);
                 }
                 audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
                 self.last_activation = ActivationResult::Activated { service_id, service_name };

@@ -2,7 +2,7 @@
 
 ComboAuth is an experimental Rust TUI for exploring arcade-style combo input as a password workflow primitive.
 
-The early product idea is simple: a user chooses a service, enters a memorable fighting-game-like combo, and ComboAuth maps that combo to a future secure action. This scaffold does not store real passwords, monitor global keyboard input, autofill fields, use the clipboard, or implement encryption. It is only the foundation for testing the interface, state model, and combo parsing logic safely.
+A user chooses a service, enters a memorable fighting-game-like combo, and ComboAuth retrieves the stored credential from the OS keychain and delivers it via clipboard (auto-cleared after 10 seconds) or stdout. Combo sequences and timing are matched in-memory; nothing sensitive is written to disk.
 
 ## MVP Scope
 
@@ -11,16 +11,7 @@ The early product idea is simple: a user chooses a service, enters a memorable f
 - Central app state and event loop.
 - Basic home screen with menu navigation.
 - Minimal combo parser with unit tests.
-- Demo/mock behavior only.
-
-## Out of Scope for This Scaffold
-
-- Real password storage.
-- Encryption or key derivation.
-- Global keyboard hooks.
-- Browser, OS, or clipboard autofill.
-- Cloud sync.
-- Any production security claims.
+- OS keychain integration (GNOME Keyring on Linux, Keychain on macOS).
 
 ## Run
 
@@ -36,9 +27,6 @@ Press `q` or `Esc` to quit.
 cargo test
 ```
 
-## Direction
-
-The safest path is to treat combo input as a user-interface layer first, not as the cryptographic secret itself. Later milestones should add threat modeling, OS keychain integration, and external security review before any real secrets are handled.
 ## Security Model
 
 ComboAuth is not protection against malware, keyloggers, or a compromised machine.

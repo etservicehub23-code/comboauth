@@ -112,3 +112,21 @@ Baseline: 104 tests passing, 2 ignored (Secret Service integration).
 - Accepted risk: Paste/PTY injection — inherent in TUI architecture; bounded by lockout after 5 failures in 30s. Full PTY-detection would require OS-level input classification.
 - Accepted risk: Lower-bound truncation — sub-millisecond drift, not exploitable.
 - Deferred: Add `failed_attempts_trigger_lockout_after_n_failures` and `quick_launch_rejects_sequence_with_bad_timing_when_profile_has_gaps` integration tests.
+
+## Phase 7 — Threat Model Coverage
+
+### Findings
+- [CRITICAL] Threat model claimed "Clipboard-free credential entry — credentials are never copied to clipboard" but `ClipboardSink` is the sole delivery mechanism, directly contradicting this claim — `docs/security/threat-model.md:29`, `src/app.rs:506,596`
+- [HIGH] README intro stated "This scaffold does not store real passwords, monitor global keyboard input, autofill fields, use the clipboard, or implement encryption" — contradicts the Security Model section in the same file which describes OS keychain storage and 10-second clipboard clearing — `README.md:5`
+- [HIGH] Clipboard clear race: `schedule_clipboard_clear` was only spawned from the tick loop; if the user quits before the 10s tick fires, the clipboard is never cleared — `src/app.rs:821-825`
+- [INFO] Audit log correctly records only service name and delivery mode; no secret bytes or combo sequences logged — `src/audit.rs:54-58`
+- [INFO] Shoulder-surfing mitigation (masking combo tokens in TUI) is delivered; credential bytes are never rendered — confirmed by prior phases
+- [INFO] Auto-relock (15s inactivity, screen change, Esc, quit) is implemented; `unlock_time` cleared on all documented paths — `src/app.rs:815-819`
+- [INFO] README Security Model section accurately states security boundary, log-safety, and 10s clipboard clearing — `README.md:42-49`
+
+### Actions taken
+- Fixed: threat-model.md "Clipboard-free credential entry" replaced with accurate "Clipboard auto-clear — credentials written to the clipboard are automatically cleared after 10 seconds" — `docs/security/threat-model.md`
+- Fixed: README intro and "Out of Scope for This Scaffold" section replaced with accurate description of current implementation — `README.md`
+- Fixed: clipboard clear race closed by adding eager `schedule_clipboard_clear(CLIPBOARD_TIMEOUT_SECS)` at both delivery sites so the background clear thread is alive regardless of main-loop tick timing — `src/app.rs:511-515,601-605`
+- Accepted risk: on-process-exit clipboard clear is now best-effort (background thread, not signal handler); SIGKILL cannot be caught
+
