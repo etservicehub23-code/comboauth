@@ -1,4 +1,15 @@
+pub mod activation;
+pub mod app;
+pub mod audit;
+pub mod combo;
+pub mod delivery;
+pub mod error;
 pub mod focus;
 pub mod hotkey;
 pub mod ipc;
 pub mod paste;
+pub mod persistence;
+pub mod profile;
+pub mod service;
+pub mod ui;
+pub mod vault;

@@ -1,14 +1,4 @@
-mod activation;
-mod audit;
-mod delivery;
-mod persistence;
-mod service;
-mod app;
-mod profile;
-mod vault;
-mod combo;
-mod error;
-mod ui;
+use comboauth::{app, error, ui, vault};
 
 use std::io::{self, stdout};
 use std::time::Duration;
