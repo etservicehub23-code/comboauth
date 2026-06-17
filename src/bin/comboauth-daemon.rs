@@ -117,21 +117,7 @@ async fn handle_connection(
     let _ = stream.write_all(&serde_json::to_vec(&response).unwrap_or_default()).await;
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "macos")]
-    {
-        if !comboauth::focus::macos_ax::ensure_trusted_with_prompt() {
-            eprintln!(
-                "comboauth-daemon: Accessibility permission not granted yet — \
-                 macOS should have shown a prompt. Grant it in System Settings \
-                 > Privacy & Security > Accessibility, then restart the daemon."
-            );
-        }
-    }
-
-    spawn_hotkey_listener(on_hotkey_triggered)?;
-
+async fn run_ipc_server() -> Result<(), Box<dyn std::error::Error>> {
     let sock = socket_path();
     if let Some(parent) = sock.parent() {
         std::fs::create_dir_all(parent)?;
@@ -148,4 +134,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let secret_store = secret_store.clone();
         tokio::spawn(handle_connection(stream, secret_store));
     }
+}
+
+/// On macOS, `global-hotkey`'s Carbon backend (`RegisterEventHotKey`) only
+/// delivers events while the *main thread's* CFRunLoop is being pumped.
+/// `#[tokio::main]` alone never pumps it, so the hotkey would register
+/// successfully but silently never fire. We run the async IPC server on a
+/// background thread and dedicate the main thread to the run loop instead.
+#[allow(unreachable_code)]
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "macos")]
+    {
+        if !comboauth::focus::macos_ax::ensure_trusted_with_prompt() {
+            eprintln!(
+                "comboauth-daemon: Accessibility permission not granted yet — \
+                 macOS should have shown a prompt. Grant it in System Settings \
+                 > Privacy & Security > Accessibility, then restart the daemon."
+            );
+        }
+    }
+
+    spawn_hotkey_listener(on_hotkey_triggered)?;
+
+    std::thread::spawn(|| {
+        let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
+        if let Err(e) = runtime.block_on(run_ipc_server()) {
+            eprintln!("comboauth-daemon: IPC server stopped: {e}");
+        }
+    });
+
+    #[cfg(target_os = "macos")]
+    {
+        core_foundation::runloop::CFRunLoop::run_current();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
+
+    Ok(())
 }
