@@ -43,7 +43,11 @@ fn build_secret_store() -> Box<dyn SecretStore + Send + Sync> {
 /// forwards trigger events into the async world via `on_trigger`.
 fn spawn_hotkey_listener(on_trigger: impl Fn() + Send + 'static) -> Result<(), Box<dyn std::error::Error>> {
     let manager = GlobalHotKeyManager::new()?;
-    let hotkey = HotKey::new(Some(Modifiers::CONTROL), Code::KeyK);
+    // TEMP for debugging (#499 thread): Ctrl+K alone is a built-in Cocoa
+    // text-editing binding ("delete to end of line") on macOS, which may
+    // consume the keystroke before it reaches the global hotkey layer.
+    // Using Ctrl+Alt+K to rule that out; revert to Ctrl+K once confirmed.
+    let hotkey = HotKey::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyK);
     manager.register(hotkey)?;
     // Keep the manager alive for the life of the process — dropping it
     // unregisters the hotkey.
@@ -64,7 +68,7 @@ fn spawn_hotkey_listener(on_trigger: impl Fn() + Send + 'static) -> Result<(), B
 
 fn on_hotkey_triggered() {
     let field_kind = comboauth::focus::focused_field_kind();
-    eprintln!("comboauth-daemon: Ctrl+K triggered, focused field = {field_kind:?}");
+    eprintln!("comboauth-daemon: hotkey triggered, focused field = {field_kind:?}");
     // TODO(follow-up phase): open the picker overlay here instead of just logging.
 }
 
