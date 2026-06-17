@@ -39,7 +39,8 @@ core-graphics = "0.23"
 core-foundation = "0.9"
 core-foundation-sys = "0.8"
 accessibility-sys = "0.1"
-objc2 = "0.5"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSRunningApplication"] }
 
 [features]
 macos-keychain = ["security-framework"]

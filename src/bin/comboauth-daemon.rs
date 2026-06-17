@@ -169,7 +169,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(target_os = "macos")]
     {
-        core_foundation::runloop::CFRunLoop::run_current();
+        // A bare CFRunLoop is not enough: RegisterEventHotKey delivers
+        // events to the *application* event target, which HIToolbox only
+        // dispatches once a real NSApplication run loop is driving the
+        // process (this is what was still missing after the CFRunLoop fix
+        // — Carbon hotkeys need the Cocoa app context, not just any run
+        // loop on the main thread). NSApplicationActivationPolicy::Accessory
+        // keeps it headless: no Dock icon, no menu bar.
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+        let mtm = MainThreadMarker::new().expect("daemon main() must run on the main thread");
+        let app = NSApplication::sharedApplication(mtm);
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+        app.run();
     }
 
     #[cfg(not(target_os = "macos"))]
