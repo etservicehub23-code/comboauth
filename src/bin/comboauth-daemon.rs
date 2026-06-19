@@ -23,6 +23,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex;
 
+/// Resolves the `comboauth` TUI binary next to this daemon binary, so
+/// ShowTui works regardless of whether target/release is on PATH.
+fn comboauth_path() -> Result<std::path::PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or("daemon executable has no parent directory")?;
+    Ok(dir.join("comboauth"))
+}
+
 #[allow(unreachable_code)]
 fn build_secret_store() -> Box<dyn SecretStore + Send + Sync> {
     #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
@@ -94,7 +102,9 @@ async fn handle_connection(
             std::process::exit(0);
         }
         DaemonRequest::ShowTui => {
-            match std::process::Command::new("comboauth").spawn() {
+            match comboauth_path().and_then(|path| {
+                std::process::Command::new(path).spawn().map_err(|e| e.to_string())
+            }) {
                 Ok(_) => DaemonResponse::Ok,
                 Err(e) => DaemonResponse::Error { message: format!("failed to launch TUI: {e}") },
             }

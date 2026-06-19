@@ -19,6 +19,22 @@ pub enum DaemonResponse {
     Status { running: bool, version: String },
 }
 
+/// Sends a request to the daemon over its Unix socket and blocks for the
+/// response. Intended for callers (like comboauth-tray) that don't run an
+/// async runtime themselves — call this from a background thread.
+pub fn send_request(request: &DaemonRequest) -> Result<DaemonResponse, Box<dyn std::error::Error>> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = UnixStream::connect(socket_path())?;
+    stream.write_all(&serde_json::to_vec(request)?)?;
+    stream.shutdown(std::net::Shutdown::Write)?;
+
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf)?;
+    Ok(serde_json::from_slice(&buf)?)
+}
+
 pub fn socket_path() -> PathBuf {
     #[cfg(target_os = "macos")]
     {
