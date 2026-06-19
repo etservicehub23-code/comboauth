@@ -1,20 +1,16 @@
 //! comboauth-daemon — background process owning the global Ctrl+K hotkey
 //! and the IPC server used by comboauth-tray.
 //!
-//! Scope note (Phase 9-B): this wires up real, independently-testable
-//! infrastructure — AX permission request, global hotkey registration,
-//! focused-field classification, clipboard paste, and the IPC protocol
-//! against the real secret store. The floating "type your combo, see it
-//! matched" picker overlay is NOT implemented yet: today, Ctrl+K logs the
-//! detected field kind, and secret delivery happens via the `PasteSelected`
-//! IPC request (callable from comboauth-tray once 9-C wires a menu for it).
-//! Capturing the full combo sequence globally requires a lower-level
-//! keyboard tap and is deferred to a follow-up phase so it can be designed
-//! and tested against the real picker UX rather than guessed at here.
+//! On Ctrl+K, opens a floating combo picker (macOS: see
+//! `comboauth::picker::macos`) that captures a combo sequence without
+//! leaking keystrokes into whatever app was focused, matches it, and
+//! pastes the resulting secret. Other platforms fall back to logging the
+//! focused field kind only, until their own picker lands.
 
 use std::sync::Arc;
 
 use comboauth::ipc::{DaemonRequest, DaemonResponse, socket_path};
+use comboauth::persistence::PersistenceStore;
 use comboauth::service::ServiceId;
 use comboauth::vault::SecretStore;
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
@@ -22,6 +18,8 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex;
+
+type SharedSecretStore = Arc<Mutex<Box<dyn SecretStore + Send + Sync>>>;
 
 /// Resolves the `comboauth` TUI binary next to this daemon binary, so
 /// ShowTui works regardless of whether target/release is on PATH.
@@ -77,6 +75,21 @@ fn build_secret_store() -> Box<dyn SecretStore + Send + Sync> {
     Box::new(comboauth::vault::mock::MockSecretStore::default())
 }
 
+#[allow(unreachable_code, dead_code)]
+fn build_persistence_store() -> Box<dyn PersistenceStore + Send + Sync> {
+    #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
+    {
+        return Box::new(comboauth::vault::macos_keychain::MacosPersistenceStore::new());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(store) = comboauth::vault::linux_oo7::OsPersistenceStore::new() {
+            return Box::new(store);
+        }
+    }
+    Box::new(comboauth::persistence::MockPersistenceStore::default())
+}
+
 /// Registers the global Ctrl+K hotkey and spawns a blocking thread that
 /// forwards trigger events into the async world via `on_trigger`.
 fn spawn_hotkey_listener(on_trigger: impl Fn() + Send + 'static) -> Result<(), Box<dyn std::error::Error>> {
@@ -100,16 +113,26 @@ fn spawn_hotkey_listener(on_trigger: impl Fn() + Send + 'static) -> Result<(), B
     Ok(())
 }
 
-fn on_hotkey_triggered() {
+fn on_hotkey_triggered(secret_store: SharedSecretStore) {
     let field_kind = comboauth::focus::focused_field_kind();
     eprintln!("comboauth-daemon: Ctrl+K triggered, focused field = {field_kind:?}");
-    // TODO(follow-up phase): open the picker overlay here instead of just logging.
+
+    #[cfg(target_os = "macos")]
+    {
+        let persistence = build_persistence_store();
+        let profiles = persistence.load_profiles().unwrap_or_default();
+        let registry = persistence.load_registry().unwrap_or_default();
+        let store_guard = secret_store.blocking_lock();
+        comboauth::picker::macos::show_picker_and_capture(profiles, registry, &**store_guard);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = secret_store;
+        eprintln!("comboauth-daemon: picker not yet implemented on this platform (Phase 9-D)");
+    }
 }
 
-async fn handle_connection(
-    mut stream: tokio::net::UnixStream,
-    secret_store: Arc<Mutex<Box<dyn SecretStore + Send + Sync>>>,
-) {
+async fn handle_connection(mut stream: tokio::net::UnixStream, secret_store: SharedSecretStore) {
     let mut buf = Vec::new();
     if stream.read_to_end(&mut buf).await.is_err() {
         return;
@@ -155,7 +178,7 @@ async fn handle_connection(
     let _ = stream.write_all(&serde_json::to_vec(&response).unwrap_or_default()).await;
 }
 
-async fn run_ipc_server() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_ipc_server(secret_store: SharedSecretStore) -> Result<(), Box<dyn std::error::Error>> {
     let sock = socket_path();
     if let Some(parent) = sock.parent() {
         std::fs::create_dir_all(parent)?;
@@ -164,8 +187,6 @@ async fn run_ipc_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let listener = UnixListener::bind(&sock)?;
     eprintln!("comboauth-daemon: listening on {}", sock.display());
-
-    let secret_store = Arc::new(Mutex::new(build_secret_store()));
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -192,12 +213,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    spawn_hotkey_listener(on_hotkey_triggered)?;
+    let secret_store: SharedSecretStore = Arc::new(Mutex::new(build_secret_store()));
 
-    std::thread::spawn(|| {
-        let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
-        if let Err(e) = runtime.block_on(run_ipc_server()) {
-            eprintln!("comboauth-daemon: IPC server stopped: {e}");
+    spawn_hotkey_listener({
+        let secret_store = secret_store.clone();
+        move || on_hotkey_triggered(secret_store.clone())
+    })?;
+
+    std::thread::spawn({
+        let secret_store = secret_store.clone();
+        move || {
+            let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
+            if let Err(e) = runtime.block_on(run_ipc_server(secret_store)) {
+                eprintln!("comboauth-daemon: IPC server stopped: {e}");
+            }
         }
     });
 

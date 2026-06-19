@@ -8,6 +8,7 @@ pub mod focus;
 pub mod hotkey;
 pub mod ipc;
 pub mod paste;
+pub mod picker;
 pub mod persistence;
 pub mod profile;
 pub mod service;

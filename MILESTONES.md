@@ -111,6 +111,17 @@ Split the project into three binaries and implement system-wide Ctrl+K autofill 
 - Accessibility permission shown once at daemon startup, never silently skipped.
 - Ctrl+K hotkey is configurable in Settings (avoid permanently stealing it from all apps).
 
+### Phase 9-F: Floating Combo Picker (macOS) — built, awaiting hardware verification
+
+- Ctrl+K now opens a small floating NSPanel that briefly takes keyboard
+  focus, captures the combo sequence via an NSEvent local monitor (no
+  CGEventTap / Input Monitoring needed — same pattern as Spotlight/Alfred),
+  matches it against persisted combo profiles, restores focus to the
+  previously-frontmost app, and pastes the matched secret.
+- Implementation: `src/picker/macos.rs`, dispatched from a background
+  thread onto the main thread via `dispatch2::run_on_main`.
+- Not yet covered: Linux equivalent (still logs field kind only).
+
 ### Done When
 
 - `cargo build --release` produces all three binaries on macOS.
