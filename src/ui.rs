@@ -323,6 +323,10 @@ fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: Rect) {
             format!("Secret unavailable for: {service_name}"),
             Style::default().fg(Color::Red),
         )),
+        ActivationResult::DeliveryFailed { service_name, .. } => Line::from(Span::styled(
+            format!("Matched {service_name}, but clipboard copy failed."),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )),
         ActivationResult::Locked => Line::from(Span::styled(
             "Too many failed attempts — locked out. Try again shortly.",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),

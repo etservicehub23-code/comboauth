@@ -26,6 +26,10 @@ pub enum ActivationResult {
         service_name: String,
         error: SecretStoreError,
     },
+    DeliveryFailed {
+        service_id: ServiceId,
+        service_name: String,
+    },
 }
 
 #[cfg(test)]

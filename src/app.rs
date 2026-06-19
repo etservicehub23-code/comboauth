@@ -516,10 +516,16 @@ impl App {
                     // if the process exits before the tick-driven clear fires.
                     crate::delivery::schedule_clipboard_clear(CLIPBOARD_TIMEOUT_SECS);
                 }
-                audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
-                self.last_activation = ActivationResult::Activated { service_id, service_name };
-                self.unlock_time = Some(Instant::now());
-                self.failed_attempts = 0;
+                if delivered {
+                    audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
+                    self.last_activation = ActivationResult::Activated { service_id, service_name };
+                    self.unlock_time = Some(Instant::now());
+                    self.failed_attempts = 0;
+                } else {
+                    audit::log(AuditEvent::Failed { reason: FailReason::DeliveryFailed });
+                    self.last_activation = ActivationResult::DeliveryFailed { service_id, service_name };
+                    self.unlock_time = None;
+                }
             } else {
                 let combo_name = self.combo_profiles.iter()
                     .find(|p| p.id == combo_profile_id)
@@ -609,10 +615,16 @@ impl App {
                     // if the process exits before the tick-driven clear fires.
                     crate::delivery::schedule_clipboard_clear(CLIPBOARD_TIMEOUT_SECS);
                 }
-                audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
-                self.last_activation = ActivationResult::Activated { service_id, service_name };
-                self.unlock_time = Some(Instant::now());
-                self.failed_attempts = 0;
+                if delivered {
+                    audit::log(AuditEvent::Activated { service_name: &service_name, delivery_mode: "clipboard" });
+                    self.last_activation = ActivationResult::Activated { service_id, service_name };
+                    self.unlock_time = Some(Instant::now());
+                    self.failed_attempts = 0;
+                } else {
+                    audit::log(AuditEvent::Failed { reason: FailReason::DeliveryFailed });
+                    self.last_activation = ActivationResult::DeliveryFailed { service_id, service_name };
+                    self.unlock_time = None;
+                }
             } else {
                 let combo_name = self.combo_profiles.iter()
                     .find(|p| p.id == combo_profile_id)

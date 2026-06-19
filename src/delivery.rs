@@ -22,7 +22,7 @@ pub trait SecretSink {
 
 /// Delivers secrets to the system clipboard.
 ///
-/// Tries wl-copy (Wayland) first, falls back to xclip (X11).
+/// Uses pbcopy on macOS; tries wl-copy (Wayland) then xclip (X11) on Linux.
 /// The caller is responsible for scheduling clipboard clearing via
 /// `schedule_clipboard_clear`.
 pub struct ClipboardSink;
@@ -30,10 +30,17 @@ pub struct ClipboardSink;
 impl SecretSink for ClipboardSink {
     fn deliver(&self, secret: &SecretMaterial) -> Result<(), DeliveryError> {
         let bytes = secret.expose_bytes();
-        if pipe_to("wl-copy", &[], bytes).is_ok() {
-            return Ok(());
+        #[cfg(target_os = "macos")]
+        {
+            return pipe_to("pbcopy", &[], bytes);
         }
-        pipe_to("xclip", &["-selection", "clipboard"], bytes)
+        #[cfg(not(target_os = "macos"))]
+        {
+            if pipe_to("wl-copy", &[], bytes).is_ok() {
+                return Ok(());
+            }
+            pipe_to("xclip", &["-selection", "clipboard"], bytes)
+        }
     }
 }
 
@@ -65,12 +72,20 @@ impl SecretSink for NullSink {
 pub fn schedule_clipboard_clear(delay_secs: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(delay_secs));
-        // wl-copy --clear is the canonical Wayland way
-        if Command::new("wl-copy").arg("--clear").status().map(|s| s.success()).unwrap_or(false) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = pipe_to("pbcopy", &[], b"");
             return;
         }
-        // X11 fallback: overwrite with empty string
-        let _ = pipe_to("xclip", &["-selection", "clipboard"], b"");
+        #[cfg(not(target_os = "macos"))]
+        {
+            // wl-copy --clear is the canonical Wayland way
+            if Command::new("wl-copy").arg("--clear").status().map(|s| s.success()).unwrap_or(false) {
+                return;
+            }
+            // X11 fallback: overwrite with empty string
+            let _ = pipe_to("xclip", &["-selection", "clipboard"], b"");
+        }
     });
 }
 

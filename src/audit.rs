@@ -25,6 +25,7 @@ pub enum FailReason {
     NoMatch,
     TimingMismatch,
     SecretUnavailable,
+    DeliveryFailed,
 }
 
 impl FailReason {
@@ -33,6 +34,7 @@ impl FailReason {
             FailReason::NoMatch => "NoMatch",
             FailReason::TimingMismatch => "TimingMismatch",
             FailReason::SecretUnavailable => "SecretUnavailable",
+            FailReason::DeliveryFailed => "DeliveryFailed",
         }
     }
 }
