@@ -72,7 +72,7 @@ Split the project into three binaries and implement system-wide Ctrl+K autofill 
   - Linux only: `atspi = "0.30"`, `ashpd = "0.13"` (global_shortcuts feature)
 - Verify `cargo check --all-targets` clean on macOS and Linux.
 
-### Phase 9-B: macOS Daemon
+### Phase 9-B: macOS Daemon — DONE, verified on hardware 2026-06-19
 
 - Register Ctrl+K with `global-hotkey` in `comboauth-daemon`.
 - On trigger: query focused element via `accessibility-sys` for `kAXSecureTextFieldSubrole` / `kAXRoleAttribute`; classify as `FieldKind::{ Secure, Editable, Unknown }`.
