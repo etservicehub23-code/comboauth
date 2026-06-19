@@ -31,6 +31,36 @@ fn comboauth_path() -> Result<std::path::PathBuf, String> {
     Ok(dir.join("comboauth"))
 }
 
+/// Launches the TUI in a fresh, real terminal window.
+///
+/// A plain `Command::new(path).spawn()` would inherit the daemon's own
+/// stdio (or none at all, depending on how the daemon itself was
+/// launched) — ratatui needs an actual TTY to enter raw mode and draw
+/// the alternate screen into, so the process must own its own terminal.
+#[cfg(target_os = "macos")]
+fn launch_tui_in_terminal(path: std::path::PathBuf) -> Result<(), String> {
+    let raw = path.display().to_string();
+    let mut escaped = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        if ch == '\\' || ch == '"' {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    let script = format!("tell application \"Terminal\" to do script \"{escaped}\"");
+    std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn launch_tui_in_terminal(path: std::path::PathBuf) -> Result<(), String> {
+    std::process::Command::new(path).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[allow(unreachable_code)]
 fn build_secret_store() -> Box<dyn SecretStore + Send + Sync> {
     #[cfg(all(target_os = "macos", feature = "macos-keychain"))]
@@ -102,10 +132,8 @@ async fn handle_connection(
             std::process::exit(0);
         }
         DaemonRequest::ShowTui => {
-            match comboauth_path().and_then(|path| {
-                std::process::Command::new(path).spawn().map_err(|e| e.to_string())
-            }) {
-                Ok(_) => DaemonResponse::Ok,
+            match comboauth_path().and_then(launch_tui_in_terminal) {
+                Ok(()) => DaemonResponse::Ok,
                 Err(e) => DaemonResponse::Error { message: format!("failed to launch TUI: {e}") },
             }
         }
