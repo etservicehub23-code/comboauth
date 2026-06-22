@@ -14,7 +14,7 @@ use comboauth::persistence::PersistenceStore;
 use comboauth::service::ServiceId;
 use comboauth::vault::SecretStore;
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
-use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager};
+use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex;
@@ -104,7 +104,11 @@ fn spawn_hotkey_listener(on_trigger: impl Fn() + Send + 'static) -> Result<(), B
         let receiver = GlobalHotKeyEvent::receiver();
         loop {
             if let Ok(event) = receiver.recv() {
-                if event.id() == hotkey.id() {
+                // global-hotkey emits both a Pressed and a Released event per
+                // keypress with the same id. Only react to Pressed, otherwise
+                // the queued Released event fires on_trigger() a second time
+                // as soon as the first (blocking) picker session returns.
+                if event.id() == hotkey.id() && event.state == HotKeyState::Pressed {
                     on_trigger();
                 }
             }
