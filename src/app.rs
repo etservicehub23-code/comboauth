@@ -41,6 +41,7 @@ pub struct App {
     pub services_phase: ServicesPhase,
     pub service_name_input: String,
     pub services_assign_cursor: usize,
+    pub combos_confirm_delete: bool,
     secret_store: Box<dyn SecretStore>,
     pub persist_store: Box<dyn PersistenceStore>,
 }
@@ -66,6 +67,8 @@ pub enum RecordPhase {
 pub enum ServicesPhase {
     List,
     AddName,
+    EditName,
+    ConfirmDelete,
     AssignCombo,
 }
 
@@ -204,6 +207,7 @@ impl Default for App {
             services_phase: ServicesPhase::List,
             service_name_input: String::new(),
             services_assign_cursor: 0,
+            combos_confirm_delete: false,
             secret_store: default_secret_store(),
             persist_store: Box::new(MockPersistenceStore::new()),
         };
@@ -275,6 +279,7 @@ impl App {
             services_phase: ServicesPhase::List,
             service_name_input: String::new(),
             services_assign_cursor: 0,
+            combos_confirm_delete: false,
             secret_store,
             persist_store: store,
         };
@@ -746,8 +751,71 @@ impl App {
         }
     }
 
+    pub fn is_combos_confirm_delete(&self) -> bool {
+        self.current_screen == Screen::Combos && self.combos_confirm_delete
+    }
+
+    pub fn start_delete_combo(&mut self) {
+        if self.current_screen != Screen::Combos
+            || self.combos_confirm_delete
+            || self.combo_profiles.is_empty()
+        {
+            return;
+        }
+        self.combos_confirm_delete = true;
+    }
+
+    pub fn cancel_combo_delete(&mut self) {
+        self.combos_confirm_delete = false;
+    }
+
+    pub fn confirm_delete_combo(&mut self) {
+        if !self.is_combos_confirm_delete() { return; }
+        if let Some(profile) = self.combo_profiles.get(self.selected_detail_item) {
+            let id = profile.id.clone();
+            self.combo_profiles.remove(self.selected_detail_item);
+            let _ = self.persist_store.delete_profile(&id);
+
+            // Orphan any service that was assigned this combo, rather than
+            // leaving it pointing at a profile that no longer exists.
+            let affected: Vec<ServiceId> = self
+                .service_registry
+                .services()
+                .iter()
+                .filter(|s| s.combo_profile_id.as_ref() == Some(&id))
+                .map(|s| s.id.clone())
+                .collect();
+            for service_id in affected {
+                if let Some(svc) = self.service_registry.get_mut(&service_id) {
+                    svc.combo_profile_id = None;
+                }
+            }
+            let _ = self.persist_store.save_registry(&self.service_registry);
+        }
+        let len = self.combo_profiles.len();
+        if len == 0 {
+            self.selected_detail_item = 0;
+        } else if self.selected_detail_item >= len {
+            self.selected_detail_item = len - 1;
+        }
+        self.sync_service_statuses();
+        self.combos_confirm_delete = false;
+    }
+
     pub fn is_services_add_name(&self) -> bool {
         self.current_screen == Screen::Services && self.services_phase == ServicesPhase::AddName
+    }
+
+    pub fn is_services_edit_name(&self) -> bool {
+        self.current_screen == Screen::Services && self.services_phase == ServicesPhase::EditName
+    }
+
+    pub fn is_services_name_entry(&self) -> bool {
+        self.is_services_add_name() || self.is_services_edit_name()
+    }
+
+    pub fn is_services_confirm_delete(&self) -> bool {
+        self.current_screen == Screen::Services && self.services_phase == ServicesPhase::ConfirmDelete
     }
 
     pub fn is_services_assign_combo(&self) -> bool {
@@ -762,15 +830,35 @@ impl App {
         self.service_name_input.clear();
     }
 
+    pub fn start_edit_service(&mut self) {
+        if self.current_screen != Screen::Services || self.services_phase != ServicesPhase::List {
+            return;
+        }
+        if let Some(svc) = self.service_registry.services().get(self.selected_detail_item) {
+            self.service_name_input = svc.name.clone();
+            self.services_phase = ServicesPhase::EditName;
+        }
+    }
+
+    pub fn start_delete_service(&mut self) {
+        if self.current_screen != Screen::Services
+            || self.services_phase != ServicesPhase::List
+            || self.service_registry.services().is_empty()
+        {
+            return;
+        }
+        self.services_phase = ServicesPhase::ConfirmDelete;
+    }
+
     pub fn service_name_push_char(&mut self, ch: char) {
-        if !self.is_services_add_name() { return; }
+        if !self.is_services_name_entry() { return; }
         if self.service_name_input.len() < 40 && ch.is_ascii() && !ch.is_ascii_control() {
             self.service_name_input.push(ch);
         }
     }
 
     pub fn service_name_backspace(&mut self) {
-        if self.is_services_add_name() {
+        if self.is_services_name_entry() {
             self.service_name_input.pop();
         }
     }
@@ -795,6 +883,40 @@ impl App {
         let _ = self.persist_store.save_registry(&self.service_registry);
         self.services_phase = ServicesPhase::List;
         self.service_name_input.clear();
+    }
+
+    pub fn save_edited_service(&mut self) {
+        if !self.is_services_edit_name() { return; }
+        let name = self.service_name_input.trim().to_owned();
+        if name.is_empty() { return; }
+        if let Some(svc) = self.service_registry.services().get(self.selected_detail_item) {
+            let id = svc.id.clone();
+            if let Some(svc_mut) = self.service_registry.get_mut(&id) {
+                svc_mut.name = name;
+            }
+        }
+        self.sync_service_statuses();
+        let _ = self.persist_store.save_registry(&self.service_registry);
+        self.services_phase = ServicesPhase::List;
+        self.service_name_input.clear();
+    }
+
+    pub fn confirm_delete_service(&mut self) {
+        if !self.is_services_confirm_delete() { return; }
+        if let Some(svc) = self.service_registry.services().get(self.selected_detail_item) {
+            let id = svc.id.clone();
+            self.service_registry.remove(&id);
+            let _ = self.secret_store.delete_secret(&id);
+        }
+        let len = self.service_registry.services().len();
+        if len == 0 {
+            self.selected_detail_item = 0;
+        } else if self.selected_detail_item >= len {
+            self.selected_detail_item = len - 1;
+        }
+        self.sync_service_statuses();
+        let _ = self.persist_store.save_registry(&self.service_registry);
+        self.services_phase = ServicesPhase::List;
     }
 
     pub fn start_assign_combo(&mut self) {

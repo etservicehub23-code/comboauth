@@ -144,7 +144,9 @@ fn render_home(frame: &mut Frame<'_>, app: &App, area: Rect) {
 fn render_services(frame: &mut Frame<'_>, app: &App, area: Rect) {
     match app.services_phase {
         ServicesPhase::List => render_services_list(frame, app, area),
-        ServicesPhase::AddName => render_services_add_name(frame, app, area),
+        ServicesPhase::AddName => render_services_name_entry(frame, app, area, "Services — Add New"),
+        ServicesPhase::EditName => render_services_name_entry(frame, app, area, "Services — Edit"),
+        ServicesPhase::ConfirmDelete => render_services_confirm_delete(frame, app, area),
         ServicesPhase::AssignCombo => render_services_assign_combo(frame, app, area),
     }
 }
@@ -171,13 +173,13 @@ fn render_services_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let list = List::new(items).block(
         Block::default()
-            .title("Services  n: add service  a: assign combo")
+            .title("Services  n: add  e: edit  d: delete  a: assign combo")
             .borders(Borders::ALL),
     );
     frame.render_widget(list, area);
 }
 
-fn render_services_add_name(frame: &mut Frame<'_>, app: &App, area: Rect) {
+fn render_services_name_entry(frame: &mut Frame<'_>, app: &App, area: Rect, title: &str) {
     let name_display = if app.service_name_input.is_empty() {
         "_".to_owned()
     } else {
@@ -185,8 +187,6 @@ fn render_services_add_name(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
 
     let detail = Paragraph::new(vec![
-        Line::from("Add a new service entry"),
-        Line::from(""),
         Line::from(vec![
             Span::raw("Name: "),
             Span::styled(
@@ -204,7 +204,42 @@ fn render_services_add_name(frame: &mut Frame<'_>, app: &App, area: Rect) {
             Style::default().fg(Color::DarkGray),
         )),
     ])
-    .block(Block::default().title("Services — Add New").borders(Borders::ALL));
+    .block(Block::default().title(title.to_owned()).borders(Borders::ALL));
+    frame.render_widget(detail, area);
+}
+
+fn render_services_confirm_delete(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let service_name = app
+        .service_registry
+        .services()
+        .get(app.selected_detail_item)
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| "(none)".to_owned());
+
+    let detail = Paragraph::new(vec![
+        Line::from("Delete this service?"),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Service: "),
+            Span::styled(
+                service_name,
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "This also removes its stored secret.",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("y", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::raw(": delete    "),
+            Span::styled("n / Esc", Style::default().fg(Color::Green)),
+            Span::raw(": cancel"),
+        ]),
+    ])
+    .block(Block::default().title("Services — Confirm Delete").borders(Borders::ALL));
     frame.render_widget(detail, area);
 }
 
@@ -255,6 +290,11 @@ fn render_services_assign_combo(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_combos(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    if app.combos_confirm_delete {
+        render_combos_confirm_delete(frame, app, area);
+        return;
+    }
+
     let items: Vec<ListItem> = app
         .combo_profiles
         .iter()
@@ -271,10 +311,44 @@ fn render_combos(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let list = List::new(items).block(
         Block::default()
-            .title("Combos - parser prototypes")
+            .title("Combos  n: record  d: delete")
             .borders(Borders::ALL),
     );
     frame.render_widget(list, area);
+}
+
+fn render_combos_confirm_delete(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let combo_name = app
+        .combo_profiles
+        .get(app.selected_detail_item)
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| "(none)".to_owned());
+
+    let detail = Paragraph::new(vec![
+        Line::from("Delete this combo?"),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Combo: "),
+            Span::styled(
+                combo_name,
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Any service assigned to it will become unassigned.",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("y", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::raw(": delete    "),
+            Span::styled("n / Esc", Style::default().fg(Color::Green)),
+            Span::raw(": cancel"),
+        ]),
+    ])
+    .block(Block::default().title("Combos — Confirm Delete").borders(Borders::ALL));
+    frame.render_widget(detail, area);
 }
 
 fn render_test_lab(frame: &mut Frame<'_>, app: &App, area: Rect) {

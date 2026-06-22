@@ -68,6 +68,11 @@ impl ServiceRegistry {
         Ok(())
     }
 
+    pub fn remove(&mut self, id: &ServiceId) -> Option<ServiceRecord> {
+        let pos = self.services.iter().position(|s| &s.id == id)?;
+        Some(self.services.remove(pos))
+    }
+
     pub fn assign_combo(
         &mut self,
         service_id: &ServiceId,

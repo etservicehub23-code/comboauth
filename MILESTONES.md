@@ -129,3 +129,26 @@ Split the project into three binaries and implement system-wide Ctrl+K autofill 
 - Tray icon starts/stops daemon and launches TUI.
 - Linux X11 path works end-to-end.
 - Wayland degrades gracefully without panicking.
+
+## 10. TUI Credential & Service Management
+
+The Services/Combos screens let you create records, but several operations
+on those records were never wired up — discovered 2026-06-22 while trying
+to actually use the app end-to-end instead of just the demo data.
+
+- [x] Edit a service's name (Services screen, `e`).
+- [x] Delete a service, including its stored secret (Services screen, `d`,
+      with `y`/`n` confirmation).
+- [x] Delete a combo profile (Combos screen, `d`, with `y`/`n` confirmation).
+      Any service assigned to the deleted combo is unassigned rather than
+      left pointing at a dead profile id.
+- [ ] **Set a service's secret from the TUI.** Currently there is no way to
+      do this at all — `SecretStore::put_secret` is only ever called for
+      the hardcoded demo data and in unit tests. Every service created
+      through the TUI ends up `MissingSecret` forever unless you drop to
+      the OS keychain directly (e.g. on macOS:
+      `security add-generic-password -a "<service-id>" -s "comboauth" -w "<secret>" -U`).
+      Needs a masked-input screen on the Services screen, same shape as the
+      add/edit-name flow.
+- [ ] Edit a combo profile's recorded sequence/timing (currently delete +
+      re-record is the only way to change one).

@@ -157,17 +157,30 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                     KeyCode::Enter if app.is_record_combo_token_capture() => {
                         app.save_recorded_combo();
                     }
-                    // Services — add service name entry (must come before general char/backspace/esc)
-                    KeyCode::Char(ch) if app.is_services_add_name() => {
+                    // Services — add/edit name entry (must come before general char/backspace/esc)
+                    KeyCode::Char(ch) if app.is_services_name_entry() => {
                         app.service_name_push_char(ch);
                     }
-                    KeyCode::Backspace if app.is_services_add_name() => {
+                    KeyCode::Backspace if app.is_services_name_entry() => {
                         app.service_name_backspace();
                     }
                     KeyCode::Enter if app.is_services_add_name() => {
                         app.save_new_service();
                     }
-                    KeyCode::Esc if app.is_services_add_name() => {
+                    KeyCode::Enter if app.is_services_edit_name() => {
+                        app.save_edited_service();
+                    }
+                    KeyCode::Esc if app.is_services_name_entry() => {
+                        app.cancel_services_action();
+                    }
+                    // Services — delete confirmation
+                    KeyCode::Char('y') if app.is_services_confirm_delete() => {
+                        app.confirm_delete_service();
+                    }
+                    KeyCode::Char('n') if app.is_services_confirm_delete() => {
+                        app.cancel_services_action();
+                    }
+                    KeyCode::Esc if app.is_services_confirm_delete() => {
                         app.cancel_services_action();
                     }
                     // Services — assign combo picker
@@ -195,9 +208,32 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                     {
                         app.start_assign_combo();
                     }
+                    KeyCode::Char('e') if app.current_screen == Screen::Services
+                        && app.services_phase == ServicesPhase::List =>
+                    {
+                        app.start_edit_service();
+                    }
+                    KeyCode::Char('d') if app.current_screen == Screen::Services
+                        && app.services_phase == ServicesPhase::List =>
+                    {
+                        app.start_delete_service();
+                    }
+                    // Combos — delete confirmation
+                    KeyCode::Char('y') if app.is_combos_confirm_delete() => {
+                        app.confirm_delete_combo();
+                    }
+                    KeyCode::Char('n') if app.is_combos_confirm_delete() => {
+                        app.cancel_combo_delete();
+                    }
+                    KeyCode::Esc if app.is_combos_confirm_delete() => {
+                        app.cancel_combo_delete();
+                    }
                     // Trigger recording from the Combos screen
                     KeyCode::Char('n') if app.current_screen == Screen::Combos => {
                         app.start_record_combo();
+                    }
+                    KeyCode::Char('d') if app.current_screen == Screen::Combos => {
+                        app.start_delete_combo();
                     }
                     KeyCode::Esc => app.go_home(),
                     KeyCode::Backspace if app.is_test_lab() => app.pop_recorded_combo_token(),
