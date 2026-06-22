@@ -147,5 +147,9 @@ to actually use the app end-to-end instead of just the demo data.
       Esc cancels without storing. Input buffer is zeroized (not just
       cleared) on save and cancel, matching the zeroization bar the audit
       set for `SecretMaterial` itself.
-- [ ] Edit a combo profile's recorded sequence/timing (currently delete +
-      re-record is the only way to change one).
+- [x] Edit a combo profile's recorded sequence/timing (currently delete +
+      re-record is the only way to change one). Combos screen, `e`: reuses
+      the existing record-token-capture screen pre-filled with the profile's
+      name, re-recording overwrites `sequence`/`gaps_ms` in place (same id,
+      so service assignments survive) and only commits if persistence
+      succeeds.

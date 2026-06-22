@@ -44,6 +44,7 @@ pub struct App {
     pub service_secret_input: String,
     pub services_assign_cursor: usize,
     pub combos_confirm_delete: bool,
+    pub editing_combo_id: Option<ComboProfileId>,
     secret_store: Box<dyn SecretStore>,
     pub persist_store: Box<dyn PersistenceStore>,
 }
@@ -212,6 +213,7 @@ impl Default for App {
             service_secret_input: String::new(),
             services_assign_cursor: 0,
             combos_confirm_delete: false,
+            editing_combo_id: None,
             secret_store: default_secret_store(),
             persist_store: Box::new(MockPersistenceStore::new()),
         };
@@ -285,6 +287,7 @@ impl App {
             service_secret_input: String::new(),
             services_assign_cursor: 0,
             combos_confirm_delete: false,
+            editing_combo_id: None,
             secret_store,
             persist_store: store,
         };
@@ -686,6 +689,7 @@ impl App {
         self.record_name_input.clear();
         self.recorded_combo_tokens.clear();
         self.recorded_timestamps.clear();
+        self.editing_combo_id = None;
         self.last_activation = ActivationResult::Waiting;
         self.unlock_time = None;
     }
@@ -734,6 +738,30 @@ impl App {
         }
         let sequence = self.recorded_combo_tokens.join(" ");
         let gaps = self.recorded_gaps_ms();
+
+        if let Some(editing_id) = self.editing_combo_id.clone() {
+            // Re-record an existing profile in place: keep its id (and thus
+            // any service assignment pointing at it), only the sequence and
+            // timing change. Only commit the in-memory change if persistence
+            // actually succeeds, so a write failure doesn't leave the TUI
+            // showing a sequence that isn't really saved to disk/keychain.
+            if let Some(idx) = self.combo_profiles.iter().position(|p| p.id == editing_id) {
+                let mut updated = self.combo_profiles[idx].clone();
+                updated.sequence = sequence;
+                updated.gaps_ms = gaps;
+                updated.status = "recorded".to_owned();
+                if self.persist_store.save_profile(&updated).is_err() {
+                    // Leave the user on the capture screen with their work intact
+                    // rather than silently discarding the re-recorded sequence.
+                    return;
+                }
+                self.combo_profiles[idx] = updated;
+                self.selected_detail_item = idx;
+            }
+            self.cancel_record_combo_inner(Screen::Combos);
+            return;
+        }
+
         let id = ComboProfileId(name.to_lowercase().replace(' ', "-"));
         let profile = ComboProfile {
             id,
@@ -768,6 +796,22 @@ impl App {
             return;
         }
         self.combos_confirm_delete = true;
+    }
+
+    pub fn start_edit_combo(&mut self) {
+        if self.current_screen != Screen::Combos || self.combos_confirm_delete {
+            return;
+        }
+        if let Some(profile) = self.combo_profiles.get(self.selected_detail_item) {
+            self.editing_combo_id = Some(profile.id.clone());
+            self.record_name_input = profile.name.clone();
+            self.current_screen = Screen::RecordCombo;
+            self.record_phase = RecordPhase::TokenCapture;
+            self.recorded_combo_tokens.clear();
+            self.recorded_timestamps.clear();
+            self.last_activation = ActivationResult::Waiting;
+            self.unlock_time = None;
+        }
     }
 
     pub fn cancel_combo_delete(&mut self) {
@@ -1060,6 +1104,7 @@ impl App {
         self.record_name_input.clear();
         self.recorded_combo_tokens.clear();
         self.recorded_timestamps.clear();
+        self.editing_combo_id = None;
         self.last_activation = ActivationResult::Waiting;
         self.unlock_time = None;
     }
@@ -1598,6 +1643,60 @@ mod tests {
         app.cancel_record_combo();
         assert_eq!(app.current_screen, Screen::Combos);
         assert!(app.record_name_input.is_empty());
+    }
+
+    #[test]
+    fn start_edit_combo_enters_token_capture_for_selected_profile() {
+        let mut app = App::default();
+        app.current_screen = Screen::Combos;
+        app.selected_detail_item = 0;
+        let original_id = app.combo_profiles[0].id.clone();
+        let original_name = app.combo_profiles[0].name.clone();
+        app.start_edit_combo();
+        assert_eq!(app.current_screen, Screen::RecordCombo);
+        assert_eq!(app.record_phase, RecordPhase::TokenCapture);
+        assert_eq!(app.editing_combo_id, Some(original_id));
+        assert_eq!(app.record_name_input, original_name);
+        assert!(app.recorded_combo_tokens.is_empty());
+    }
+
+    #[test]
+    fn save_recorded_combo_updates_existing_profile_in_place() {
+        let mut app = App::default();
+        app.current_screen = Screen::Combos;
+        app.selected_detail_item = 0;
+        let original_id = app.combo_profiles[0].id.clone();
+        let original_name = app.combo_profiles[0].name.clone();
+        let initial_count = app.combo_profiles.len();
+
+        app.start_edit_combo();
+        app.record_combo_shortcut('u');
+        app.record_combo_shortcut('p');
+        app.save_recorded_combo();
+
+        assert_eq!(app.combo_profiles.len(), initial_count);
+        assert_eq!(app.current_screen, Screen::Combos);
+        assert!(app.editing_combo_id.is_none());
+        let updated = app.combo_profiles.iter().find(|p| p.id == original_id).unwrap();
+        assert_eq!(updated.name, original_name);
+        assert_eq!(updated.sequence, "up P");
+        assert_eq!(updated.status, "recorded");
+    }
+
+    #[test]
+    fn cancel_edit_combo_leaves_profile_unchanged() {
+        let mut app = App::default();
+        app.current_screen = Screen::Combos;
+        app.selected_detail_item = 0;
+        let original_sequence = app.combo_profiles[0].sequence.clone();
+
+        app.start_edit_combo();
+        app.record_combo_shortcut('u');
+        app.cancel_record_combo();
+
+        assert_eq!(app.current_screen, Screen::Combos);
+        assert!(app.editing_combo_id.is_none());
+        assert_eq!(app.combo_profiles[0].sequence, original_sequence);
     }
 
     // --- Services flow ---

@@ -250,6 +250,9 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                     KeyCode::Char('n') if app.current_screen == Screen::Combos => {
                         app.start_record_combo();
                     }
+                    KeyCode::Char('e') if app.current_screen == Screen::Combos => {
+                        app.start_edit_combo();
+                    }
                     KeyCode::Char('d') if app.current_screen == Screen::Combos => {
                         app.start_delete_combo();
                     }

@@ -349,7 +349,7 @@ fn render_combos(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let list = List::new(items).block(
         Block::default()
-            .title("Combos  n: record  d: delete")
+            .title("Combos  n: record  e: edit  d: delete")
             .borders(Borders::ALL),
     );
     frame.render_widget(list, area);
@@ -576,7 +576,12 @@ fn render_record_combo(frame: &mut Frame<'_>, app: &App, area: Rect) {
         }
     };
 
-    let title = format!("Record New Combo — {phase_label}");
+    let title_prefix = if app.editing_combo_id.is_some() {
+        "Edit Combo Sequence"
+    } else {
+        "Record New Combo"
+    };
+    let title = format!("{title_prefix} — {phase_label}");
     let detail = Paragraph::new(body_lines)
         .block(Block::default().title(title).borders(Borders::ALL));
     frame.render_widget(detail, area);
