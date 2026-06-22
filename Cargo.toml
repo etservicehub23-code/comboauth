@@ -47,6 +47,7 @@ objc2-app-kit = { version = "0.3", features = [
 objc2-foundation = "0.3"
 block2 = "0.6"
 dispatch2 = "0.3"
+png = "0.17"
 
 [features]
 macos-keychain = ["security-framework"]

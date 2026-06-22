@@ -6,14 +6,26 @@
 #[cfg(target_os = "macos")]
 use comboauth::ipc::{DaemonRequest, DaemonResponse, send_request};
 
+/// Menu bar icon: a keycap with a keyhole notch, baked from
+/// `assets/tray-icon.svg` into `assets/tray-icon.png` (22x22, black on
+/// transparent). Decoded at startup and loaded as a "template" image so
+/// macOS recolors it automatically for light/dark menu bars — only the
+/// alpha channel matters for a template image, so solid black is correct
+/// regardless of appearance.
 #[cfg(target_os = "macos")]
 fn build_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
-    const SIZE: u32 = 22;
-    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
-    for _ in 0..(SIZE * SIZE) {
-        rgba.extend_from_slice(&[30, 144, 255, 255]);
-    }
-    Ok(tray_icon::Icon::from_rgba(rgba, SIZE, SIZE)?)
+    const ICON_PNG: &[u8] = include_bytes!("../../assets/tray-icon.png");
+
+    let decoder = png::Decoder::new(ICON_PNG);
+    let mut reader = decoder.read_info()?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf)?;
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
+        other => return Err(format!("tray-icon.png: expected RGBA, got {other:?}").into()),
+    };
+
+    Ok(tray_icon::Icon::from_rgba(rgba, info.width, info.height)?)
 }
 
 #[cfg(target_os = "macos")]
@@ -71,6 +83,7 @@ fn run_macos_tray() -> Result<(), Box<dyn std::error::Error>> {
     let _tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_icon(build_icon()?)
+        .with_icon_as_template(true)
         .with_tooltip("ComboAuth")
         .build()?;
 
