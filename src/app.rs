@@ -7,6 +7,7 @@ use crate::service::{ServiceId, ServiceRecord, ServiceRegistry, ServiceStatus};
 use crate::persistence::{MockPersistenceStore, PersistenceStore};
 use crate::vault::mock::MockSecretStore;
 use crate::vault::{SecretMaterial, SecretStore};
+use zeroize::Zeroize;
 use crate::delivery::{ClipboardSink, SecretSink, CLIPBOARD_TIMEOUT_SECS};
 use crate::audit::{self, AuditEvent, FailReason};
 
@@ -40,6 +41,7 @@ pub struct App {
     pub record_name_input: String,
     pub services_phase: ServicesPhase,
     pub service_name_input: String,
+    pub service_secret_input: String,
     pub services_assign_cursor: usize,
     pub combos_confirm_delete: bool,
     secret_store: Box<dyn SecretStore>,
@@ -70,6 +72,7 @@ pub enum ServicesPhase {
     EditName,
     ConfirmDelete,
     AssignCombo,
+    SetSecret,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +209,7 @@ impl Default for App {
             record_name_input: String::new(),
             services_phase: ServicesPhase::List,
             service_name_input: String::new(),
+            service_secret_input: String::new(),
             services_assign_cursor: 0,
             combos_confirm_delete: false,
             secret_store: default_secret_store(),
@@ -278,6 +282,7 @@ impl App {
             record_name_input: String::new(),
             services_phase: ServicesPhase::List,
             service_name_input: String::new(),
+            service_secret_input: String::new(),
             services_assign_cursor: 0,
             combos_confirm_delete: false,
             secret_store,
@@ -850,6 +855,49 @@ impl App {
         self.services_phase = ServicesPhase::ConfirmDelete;
     }
 
+    pub fn is_services_set_secret(&self) -> bool {
+        self.current_screen == Screen::Services && self.services_phase == ServicesPhase::SetSecret
+    }
+
+    pub fn start_set_secret(&mut self) {
+        if self.current_screen != Screen::Services
+            || self.services_phase != ServicesPhase::List
+            || self.service_registry.services().is_empty()
+        {
+            return;
+        }
+        self.service_secret_input.zeroize();
+        self.service_secret_input.clear();
+        self.services_phase = ServicesPhase::SetSecret;
+    }
+
+    pub fn service_secret_push_char(&mut self, ch: char) {
+        if !self.is_services_set_secret() { return; }
+        if self.service_secret_input.len() < 256 && ch.is_ascii() && !ch.is_ascii_control() {
+            self.service_secret_input.push(ch);
+        }
+    }
+
+    pub fn service_secret_backspace(&mut self) {
+        if self.is_services_set_secret() {
+            self.service_secret_input.pop();
+        }
+    }
+
+    pub fn save_service_secret(&mut self) {
+        if !self.is_services_set_secret() { return; }
+        if self.service_secret_input.is_empty() { return; }
+        if let Some(svc) = self.service_registry.services().get(self.selected_detail_item) {
+            let id = svc.id.clone();
+            let secret = SecretMaterial::new(self.service_secret_input.as_bytes().to_vec());
+            let _ = self.secret_store.put_secret(id, secret);
+        }
+        self.service_secret_input.zeroize();
+        self.service_secret_input.clear();
+        self.sync_service_statuses();
+        self.services_phase = ServicesPhase::List;
+    }
+
     pub fn service_name_push_char(&mut self, ch: char) {
         if !self.is_services_name_entry() { return; }
         if self.service_name_input.len() < 40 && ch.is_ascii() && !ch.is_ascii_control() {
@@ -948,6 +996,8 @@ impl App {
         if self.current_screen == Screen::Services && self.services_phase != ServicesPhase::List {
             self.services_phase = ServicesPhase::List;
             self.service_name_input.clear();
+            self.service_secret_input.zeroize();
+            self.service_secret_input.clear();
         }
     }
 
@@ -1599,6 +1649,68 @@ mod tests {
         app.cancel_services_action();
         assert_eq!(app.services_phase, ServicesPhase::List);
         assert!(app.service_name_input.is_empty());
+    }
+
+    #[test]
+    fn start_set_secret_enters_set_secret_phase() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        app.start_set_secret();
+        assert_eq!(app.services_phase, ServicesPhase::SetSecret);
+        assert!(app.service_secret_input.is_empty());
+    }
+
+    #[test]
+    fn save_service_secret_stores_in_vault_and_flips_status() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        // Pick a service that starts without a secret (sync runs at App::default()
+        // construction time, so this only needs to hold for a fresh service).
+        app.start_add_service();
+        app.service_name_push_char('N');
+        app.service_name_push_char('e');
+        app.service_name_push_char('w');
+        app.save_new_service();
+        let idx = app.service_registry.services().len() - 1;
+        app.selected_detail_item = idx;
+        assert_eq!(app.service_registry.services()[idx].status, ServiceStatus::Unassigned);
+
+        app.start_set_secret();
+        for ch in "hunter2".chars() {
+            app.service_secret_push_char(ch);
+        }
+        app.save_service_secret();
+
+        assert_eq!(app.services_phase, ServicesPhase::List);
+        assert!(app.service_secret_input.is_empty());
+        let id = app.service_registry.services()[idx].id.clone();
+        assert!(app.secret_store.contains_secret(&id));
+    }
+
+    #[test]
+    fn save_service_secret_noop_when_blank() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        let id = app.service_registry.services()[0].id.clone();
+        let _ = app.secret_store.delete_secret(&id);
+        app.start_set_secret();
+        app.save_service_secret();
+        assert_eq!(app.services_phase, ServicesPhase::SetSecret);
+        assert!(!app.secret_store.contains_secret(&id));
+    }
+
+    #[test]
+    fn cancel_set_secret_clears_buffer_without_storing() {
+        let mut app = App::default();
+        app.current_screen = Screen::Services;
+        let id = app.service_registry.services()[0].id.clone();
+        let _ = app.secret_store.delete_secret(&id);
+        app.start_set_secret();
+        app.service_secret_push_char('x');
+        app.cancel_services_action();
+        assert_eq!(app.services_phase, ServicesPhase::List);
+        assert!(app.service_secret_input.is_empty());
+        assert!(!app.secret_store.contains_secret(&id));
     }
 
     #[test]

@@ -183,6 +183,19 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                     KeyCode::Esc if app.is_services_confirm_delete() => {
                         app.cancel_services_action();
                     }
+                    // Services — set secret (masked input, separate buffer from name entry)
+                    KeyCode::Char(ch) if app.is_services_set_secret() => {
+                        app.service_secret_push_char(ch);
+                    }
+                    KeyCode::Backspace if app.is_services_set_secret() => {
+                        app.service_secret_backspace();
+                    }
+                    KeyCode::Enter if app.is_services_set_secret() => {
+                        app.save_service_secret();
+                    }
+                    KeyCode::Esc if app.is_services_set_secret() => {
+                        app.cancel_services_action();
+                    }
                     // Services — assign combo picker
                     KeyCode::Enter if app.is_services_assign_combo() => {
                         app.confirm_assign_combo();
@@ -217,6 +230,11 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) 
                         && app.services_phase == ServicesPhase::List =>
                     {
                         app.start_delete_service();
+                    }
+                    KeyCode::Char('s') if app.current_screen == Screen::Services
+                        && app.services_phase == ServicesPhase::List =>
+                    {
+                        app.start_set_secret();
                     }
                     // Combos — delete confirmation
                     KeyCode::Char('y') if app.is_combos_confirm_delete() => {

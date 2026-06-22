@@ -142,13 +142,10 @@ to actually use the app end-to-end instead of just the demo data.
 - [x] Delete a combo profile (Combos screen, `d`, with `y`/`n` confirmation).
       Any service assigned to the deleted combo is unassigned rather than
       left pointing at a dead profile id.
-- [ ] **Set a service's secret from the TUI.** Currently there is no way to
-      do this at all — `SecretStore::put_secret` is only ever called for
-      the hardcoded demo data and in unit tests. Every service created
-      through the TUI ends up `MissingSecret` forever unless you drop to
-      the OS keychain directly (e.g. on macOS:
-      `security add-generic-password -a "<service-id>" -s "comboauth" -w "<secret>" -U`).
-      Needs a masked-input screen on the Services screen, same shape as the
-      add/edit-name flow.
+- [x] **Set a service's secret from the TUI.** Services screen, `s`: masked
+      input (rendered as `•`), Enter writes it via `SecretStore::put_secret`,
+      Esc cancels without storing. Input buffer is zeroized (not just
+      cleared) on save and cancel, matching the zeroization bar the audit
+      set for `SecretMaterial` itself.
 - [ ] Edit a combo profile's recorded sequence/timing (currently delete +
       re-record is the only way to change one).

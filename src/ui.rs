@@ -148,6 +148,7 @@ fn render_services(frame: &mut Frame<'_>, app: &App, area: Rect) {
         ServicesPhase::EditName => render_services_name_entry(frame, app, area, "Services — Edit"),
         ServicesPhase::ConfirmDelete => render_services_confirm_delete(frame, app, area),
         ServicesPhase::AssignCombo => render_services_assign_combo(frame, app, area),
+        ServicesPhase::SetSecret => render_services_set_secret(frame, app, area),
     }
 }
 
@@ -173,10 +174,47 @@ fn render_services_list(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let list = List::new(items).block(
         Block::default()
-            .title("Services  n: add  e: edit  d: delete  a: assign combo")
+            .title("Services  n: add  e: edit  d: delete  s: set secret  a: assign combo")
             .borders(Borders::ALL),
     );
     frame.render_widget(list, area);
+}
+
+fn render_services_set_secret(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let service_name = app
+        .service_registry
+        .services()
+        .get(app.selected_detail_item)
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| "(none)".to_owned());
+
+    let masked = "•".repeat(app.service_secret_input.chars().count());
+
+    let detail = Paragraph::new(vec![
+        Line::from(vec![
+            Span::raw("Service: "),
+            Span::styled(service_name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Secret: "),
+            Span::styled(
+                format!("{masked}_"),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Type the secret, then press Enter to store it in the OS keychain",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "Esc to cancel — nothing typed here is saved unless you press Enter",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ])
+    .block(Block::default().title("Services — Set Secret").borders(Borders::ALL));
+    frame.render_widget(detail, area);
 }
 
 fn render_services_name_entry(frame: &mut Frame<'_>, app: &App, area: Rect, title: &str) {
