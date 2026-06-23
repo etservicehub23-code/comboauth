@@ -21,6 +21,22 @@ cargo run
 
 Press `q` or `Esc` to quit.
 
+### Global hotkey daemon + menu bar tray (macOS)
+
+`comboauth-daemon` (global Ctrl+K hotkey, floating picker, auto-paste) and
+`comboauth-tray` (menu bar icon, start/stop daemon, launch TUI) are separate
+binaries. After `cargo build --release --features macos-keychain`, start
+both together with:
+
+```bash
+./scripts/launch.sh
+```
+
+Safe to re-run — it skips starting either binary if it's already running.
+Logs go to `/tmp/comboauth-daemon.log` and `/tmp/comboauth-tray.log` (override
+with `COMBOAUTH_LOG_DIR`); binary location defaults to `target/release`
+(override with `COMBOAUTH_BIN_DIR`).
+
 ## Test
 
 ```bash
