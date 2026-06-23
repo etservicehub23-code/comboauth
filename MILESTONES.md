@@ -153,3 +153,38 @@ to actually use the app end-to-end instead of just the demo data.
       name, re-recording overwrites `sequence`/`gaps_ms` in place (same id,
       so service assignments survive) and only commits if persistence
       succeeds.
+
+## 11. Paste Safety — Field-Kind Gating
+
+`FieldKind::{Secure, Editable, NonEditable, Unknown}` (macOS AX-based focused
+field detection, `src/focus/macos_ax.rs`) is computed on every Ctrl+K trigger
+but currently only logged — paste happens into the focused field regardless
+of its kind. Scoped 2026-06-23 from a codex-oracle review (read-only,
+`docs/security/AUDIT.md`-style: not a security boundary against a malicious
+app, but a real reduction in accidental-paste risk). Do NOT hard-block on
+`!= Secure` — the oracle's matrix reasoning is that terminal password
+prompts, custom widgets, and some Electron apps legitimately won't report
+`Secure`, so a hard block would make the feature unusable in common cases.
+Three-tier policy instead: `Secure` -> paste; `Editable`/`Unknown` -> require
+an explicit extra confirmation before pasting; `NonEditable` -> refuse
+auto-paste, offer clipboard-copy instead.
+
+- [ ] Add a shared gating helper (e.g. `fn paste_decision(kind: FieldKind) ->
+      PasteDecision { AutoPaste, ConfirmFirst, Refuse }`) and wire it into the
+      Ctrl+K picker path (`src/picker/macos.rs`, after combo match, before
+      `paste::paste_and_clear` is called from `show_picker_and_capture` in
+      `src/picker/macos.rs:63`). `ConfirmFirst` means the picker shows the
+      field kind and requires one more keypress before pasting, not a silent
+      auto-paste. `Refuse` copies to clipboard (reusing existing
+      clipboard-clear-after-delay logic) instead of synthesizing the keystroke,
+      and tells the user why via the existing eprintln-style status reporting.
+- [ ] Apply the same `paste_decision` policy to the IPC `PasteSelected`
+      handler (`src/bin/comboauth-daemon.rs:163`, currently pastes
+      unconditionally). This path doesn't have a `FieldKind` computed yet —
+      add the `focused_field_kind()` call there too, same as
+      `on_hotkey_triggered` already does, before deciding.
+- [ ] Update `docs/security/threat-model.md` to state plainly that AX field
+      detection reduces *accidental* paste into the wrong field and is not a
+      defense against a malicious/compromised focused app spoofing its
+      accessibility role — it should not be described in a way that implies
+      it's an authoritative security boundary.
