@@ -165,16 +165,43 @@ async fn handle_connection(mut stream: tokio::net::UnixStream, secret_store: Sha
             }
         }
         DaemonRequest::PasteSelected { entry_id } => {
-            let store = secret_store.lock().await;
-            match store.get_secret(&ServiceId(entry_id)) {
-                Ok(secret) => {
-                    let secret_str = String::from_utf8_lossy(secret.expose_bytes()).into_owned();
-                    match comboauth::paste::paste_and_clear(&secret_str, 200) {
-                        Ok(()) => DaemonResponse::Ok,
-                        Err(e) => DaemonResponse::Error { message: format!("paste failed: {e}") },
+            let field_kind = comboauth::focus::focused_field_kind();
+            eprintln!("comboauth-daemon: PasteSelected IPC, focused field = {field_kind:?}");
+
+            use comboauth::focus::{PasteDecision, paste_decision};
+            match paste_decision(field_kind) {
+                PasteDecision::ConfirmFirst => DaemonResponse::Error {
+                    message: format!(
+                        "field kind {field_kind:?} requires explicit confirmation before pasting; use the Ctrl+K picker instead"
+                    ),
+                },
+                decision => {
+                    // Look up and copy the secret bytes, then release the lock
+                    // *before* calling paste/copy — those may block for up to
+                    // 8 s (copy_and_clear clear delay) and holding the mutex
+                    // that long would stall any concurrent store access.
+                    let secret_result = {
+                        let store = secret_store.lock().await;
+                        store.get_secret(&ServiceId(entry_id))
+                            .map(|s| s.expose_bytes().to_vec())
+                    };
+                    match secret_result {
+                        Ok(secret_bytes) => {
+                            let secret_str = String::from_utf8_lossy(&secret_bytes).into_owned();
+                            let result = if decision == PasteDecision::Refuse {
+                                eprintln!("comboauth-daemon: PasteSelected refused (NonEditable field) — copying to clipboard instead");
+                                comboauth::paste::copy_and_clear(&secret_str, 8000)
+                            } else {
+                                comboauth::paste::paste_and_clear(&secret_str, 200)
+                            };
+                            match result {
+                                Ok(()) => DaemonResponse::Ok,
+                                Err(e) => DaemonResponse::Error { message: format!("paste/copy failed: {e}") },
+                            }
+                        }
+                        Err(e) => DaemonResponse::Error { message: format!("secret lookup failed: {e}") },
                     }
                 }
-                Err(e) => DaemonResponse::Error { message: format!("secret lookup failed: {e}") },
             }
         }
     };

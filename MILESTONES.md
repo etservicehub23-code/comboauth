@@ -182,7 +182,7 @@ auto-paste, offer clipboard-copy instead.
       enough to manually paste, unlike the near-instant clear used after an
       actual auto-paste) and reports why via eprintln. Daemon IPC
       `PasteSelected` path intentionally left unchanged (next checklist item).
-- [ ] Apply the same `paste_decision` policy to the IPC `PasteSelected`
+- [x] Apply the same `paste_decision` policy to the IPC `PasteSelected`
       handler (`src/bin/comboauth-daemon.rs:163`, currently pastes
       unconditionally). This path doesn't have a `FieldKind` computed yet —
       add the `focused_field_kind()` call there too, same as
