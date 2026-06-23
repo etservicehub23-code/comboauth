@@ -127,7 +127,7 @@ fn on_hotkey_triggered(secret_store: SharedSecretStore) {
         let profiles = persistence.load_profiles().unwrap_or_default();
         let registry = persistence.load_registry().unwrap_or_default();
         let store_guard = secret_store.blocking_lock();
-        comboauth::picker::macos::show_picker_and_capture(profiles, registry, &**store_guard);
+        comboauth::picker::macos::show_picker_and_capture(profiles, registry, &**store_guard, field_kind);
     }
     #[cfg(not(target_os = "macos"))]
     {

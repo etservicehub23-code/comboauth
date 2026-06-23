@@ -27,11 +27,16 @@ use objc2_app_kit::{
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use crate::combo::Combo;
+use crate::focus::{paste_decision, FieldKind, PasteDecision};
 use crate::profile::{ComboProfile, ComboProfileId};
 use crate::service::{ServiceId, ServiceRegistry};
 use crate::vault::SecretStore;
 
 const TIMING_TOLERANCE_PCT: u32 = 40;
+/// Clipboard clear delay for `PasteDecision::Refuse`: long enough for the
+/// user to manually paste (unlike the near-instant clear after an
+/// auto-paste, where the keystroke already happened).
+const REFUSE_COPY_CLEAR_MS: u64 = 8_000;
 const ARROW_UP: u16 = 126;
 const ARROW_DOWN: u16 = 125;
 const ARROW_LEFT: u16 = 123;
@@ -53,16 +58,27 @@ pub fn show_picker_and_capture(
     profiles: Vec<ComboProfile>,
     registry: ServiceRegistry,
     secret_store: &(dyn SecretStore + Send + Sync),
+    field_kind: FieldKind,
 ) {
-    let outcome = dispatch2::run_on_main(|mtm| run_picker(mtm, &profiles, &registry));
+    let decision = paste_decision(field_kind);
+    let outcome = dispatch2::run_on_main(|mtm| run_picker(mtm, &profiles, &registry, decision, field_kind));
 
     match outcome {
         Outcome::Matched { service_id, service_name } => match secret_store.get_secret(&service_id) {
             Ok(secret) => {
                 let secret_str = String::from_utf8_lossy(secret.expose_bytes()).into_owned();
-                match crate::paste::paste_and_clear(&secret_str, 200) {
-                    Ok(()) => eprintln!("comboauth-daemon: picker matched '{service_name}', pasted"),
-                    Err(e) => eprintln!("comboauth-daemon: picker matched '{service_name}' but paste failed: {e}"),
+                if decision == PasteDecision::Refuse {
+                    match crate::paste::copy_and_clear(&secret_str, REFUSE_COPY_CLEAR_MS) {
+                        Ok(()) => eprintln!(
+                            "comboauth-daemon: picker matched '{service_name}', focused field is {field_kind:?} (not editable) -- copied to clipboard instead of auto-pasting"
+                        ),
+                        Err(e) => eprintln!("comboauth-daemon: picker matched '{service_name}' but clipboard copy failed: {e}"),
+                    }
+                } else {
+                    match crate::paste::paste_and_clear(&secret_str, 200) {
+                        Ok(()) => eprintln!("comboauth-daemon: picker matched '{service_name}', pasted"),
+                        Err(e) => eprintln!("comboauth-daemon: picker matched '{service_name}' but paste failed: {e}"),
+                    }
                 }
             }
             Err(e) => eprintln!("comboauth-daemon: picker matched '{service_name}' but secret lookup failed: {e}"),
@@ -73,7 +89,13 @@ pub fn show_picker_and_capture(
     }
 }
 
-fn run_picker(mtm: MainThreadMarker, profiles: &[ComboProfile], registry: &ServiceRegistry) -> Outcome {
+fn run_picker(
+    mtm: MainThreadMarker,
+    profiles: &[ComboProfile],
+    registry: &ServiceRegistry,
+    decision: PasteDecision,
+    field_kind: FieldKind,
+) -> Outcome {
     let workspace = NSWorkspace::sharedWorkspace();
     let previous_app = workspace.frontmostApplication();
 
@@ -84,6 +106,10 @@ fn run_picker(mtm: MainThreadMarker, profiles: &[ComboProfile], registry: &Servi
     let tokens: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
     let timestamps: Rc<RefCell<Vec<Instant>>> = Rc::new(RefCell::new(Vec::new()));
     let outcome: Rc<RefCell<Option<Outcome>>> = Rc::new(RefCell::new(None));
+    // Set once a combo matches under `PasteDecision::ConfirmFirst`, while we
+    // wait for the one extra keypress the policy requires before pasting.
+    let awaiting_confirm: Rc<RefCell<bool>> = Rc::new(RefCell::new(false));
+    let pending_match: Rc<RefCell<Option<(ServiceId, String)>>> = Rc::new(RefCell::new(None));
 
     let app = NSApplication::sharedApplication(mtm);
 
@@ -91,6 +117,8 @@ fn run_picker(mtm: MainThreadMarker, profiles: &[ComboProfile], registry: &Servi
         let tokens = tokens.clone();
         let timestamps = timestamps.clone();
         let outcome = outcome.clone();
+        let awaiting_confirm = awaiting_confirm.clone();
+        let pending_match = pending_match.clone();
         let profiles = profiles.to_vec();
         let registry = registry.clone();
         let app = app.clone();
@@ -99,13 +127,45 @@ fn run_picker(mtm: MainThreadMarker, profiles: &[ComboProfile], registry: &Servi
             let event_ref = unsafe { event.as_ref() };
             let key_code = event_ref.keyCode();
 
+            if *awaiting_confirm.borrow() {
+                match key_code {
+                    KEYCODE_RETURN => {
+                        *outcome.borrow_mut() = Some(match pending_match.borrow_mut().take() {
+                            Some((service_id, service_name)) => Outcome::Matched { service_id, service_name },
+                            None => Outcome::Cancelled,
+                        });
+                        app.stopModal();
+                    }
+                    KEYCODE_ESCAPE => {
+                        *outcome.borrow_mut() = Some(Outcome::Cancelled);
+                        app.stopModal();
+                    }
+                    // Any other key while awaiting confirmation is ignored
+                    // rather than feeding into the (already-finished) combo
+                    // capture buffer.
+                    _ => {}
+                }
+                return std::ptr::null_mut();
+            }
+
             match key_code {
                 KEYCODE_RETURN => {
                     let recorded_str = tokens.borrow().join(" ");
                     let recorded = Combo::parse(&recorded_str);
                     let gaps = compute_gaps(&timestamps.borrow());
-                    *outcome.borrow_mut() = Some(match_combo(recorded, &gaps, &profiles, &registry));
-                    app.stopModal();
+                    match match_combo(recorded, &gaps, &profiles, &registry) {
+                        Outcome::Matched { service_id, service_name } if decision == PasteDecision::ConfirmFirst => {
+                            eprintln!(
+                                "comboauth-daemon: picker matched '{service_name}', focused field is {field_kind:?} -- press Enter again to paste, Esc to cancel"
+                            );
+                            *pending_match.borrow_mut() = Some((service_id, service_name));
+                            *awaiting_confirm.borrow_mut() = true;
+                        }
+                        other => {
+                            *outcome.borrow_mut() = Some(other);
+                            app.stopModal();
+                        }
+                    }
                 }
                 KEYCODE_ESCAPE => {
                     *outcome.borrow_mut() = Some(Outcome::Cancelled);

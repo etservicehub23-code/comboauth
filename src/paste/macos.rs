@@ -46,3 +46,21 @@ pub fn paste_and_clear(secret: &str, clear_after_ms: u64) -> Result<(), Box<dyn 
     paste_result?;
     Ok(())
 }
+
+/// Write `secret` to clipboard, then clear it after `clear_after_ms`, without
+/// synthesizing the Cmd+V keystroke.
+pub fn copy_and_clear(secret: &str, clear_after_ms: u64) -> Result<(), Box<dyn std::error::Error>> {
+    let mut clipboard = Clipboard::new()?;
+    let previous = clipboard.get_text().ok();
+
+    clipboard.set_text(secret.to_owned())?;
+
+    thread::sleep(Duration::from_millis(clear_after_ms));
+
+    match previous {
+        Some(text) => clipboard.set_text(text)?,
+        None => clipboard.clear()?,
+    }
+
+    Ok(())
+}

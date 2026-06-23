@@ -12,3 +12,15 @@ pub fn paste_and_clear(_secret: &str, _clear_after_ms: u64) -> Result<(), Box<dy
     #[allow(unreachable_code)]
     Err("unsupported platform".into())
 }
+
+/// Write `secret` to clipboard, then clear after `clear_after_ms`, without
+/// synthesizing a paste keystroke. Used when `focus::PasteDecision::Refuse`
+/// applies (focused field is confirmed not editable).
+pub fn copy_and_clear(_secret: &str, _clear_after_ms: u64) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "macos")]
+    return macos::copy_and_clear(_secret, _clear_after_ms);
+    #[cfg(target_os = "linux")]
+    return linux::copy_and_clear(_secret, _clear_after_ms);
+    #[allow(unreachable_code)]
+    Err("unsupported platform".into())
+}

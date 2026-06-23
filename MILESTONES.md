@@ -169,15 +169,19 @@ Three-tier policy instead: `Secure` -> paste; `Editable`/`Unknown` -> require
 an explicit extra confirmation before pasting; `NonEditable` -> refuse
 auto-paste, offer clipboard-copy instead.
 
-- [ ] Add a shared gating helper (e.g. `fn paste_decision(kind: FieldKind) ->
+- [x] Add a shared gating helper (`focus::paste_decision(FieldKind) ->
       PasteDecision { AutoPaste, ConfirmFirst, Refuse }`) and wire it into the
-      Ctrl+K picker path (`src/picker/macos.rs`, after combo match, before
-      `paste::paste_and_clear` is called from `show_picker_and_capture` in
-      `src/picker/macos.rs:63`). `ConfirmFirst` means the picker shows the
-      field kind and requires one more keypress before pasting, not a silent
-      auto-paste. `Refuse` copies to clipboard (reusing existing
-      clipboard-clear-after-delay logic) instead of synthesizing the keystroke,
-      and tells the user why via the existing eprintln-style status reporting.
+      Ctrl+K picker path (`src/picker/macos.rs`). `ConfirmFirst` requires a
+      second Enter press in the picker's existing key monitor before pasting
+      (Esc still cancels; other keys are ignored while awaiting confirmation);
+      which field kind triggered it is reported via eprintln only, since the
+      panel has no text-rendering UI yet to show it on-screen — a known gap,
+      not silent auto-paste. `Refuse` copies to clipboard via a new
+      `paste::copy_and_clear` (same restore-after-delay logic as
+      `paste_and_clear`, minus the keystroke) with an 8s clear delay (long
+      enough to manually paste, unlike the near-instant clear used after an
+      actual auto-paste) and reports why via eprintln. Daemon IPC
+      `PasteSelected` path intentionally left unchanged (next checklist item).
 - [ ] Apply the same `paste_decision` policy to the IPC `PasteSelected`
       handler (`src/bin/comboauth-daemon.rs:163`, currently pastes
       unconditionally). This path doesn't have a `FieldKind` computed yet —
