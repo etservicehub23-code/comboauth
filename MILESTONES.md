@@ -187,8 +187,9 @@ auto-paste, offer clipboard-copy instead.
       unconditionally). This path doesn't have a `FieldKind` computed yet —
       add the `focused_field_kind()` call there too, same as
       `on_hotkey_triggered` already does, before deciding.
-- [ ] Update `docs/security/threat-model.md` to state plainly that AX field
+- [x] Update `docs/security/threat-model.md` to state plainly that AX field
       detection reduces *accidental* paste into the wrong field and is not a
       defense against a malicious/compromised focused app spoofing its
       accessibility role — it should not be described in a way that implies
-      it's an authoritative security boundary.
+      it's an authoritative security boundary. Advisory-only wording applied,
+      table prefixed with 'AX-reported', clipboard fallback caveat added.

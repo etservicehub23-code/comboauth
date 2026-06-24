@@ -56,6 +56,38 @@ The OS is responsible for:
 2. Enforcing session-level access control
 3. Prompting for OS-level auth when the keychain is first unlocked
 
+## AX Field-Kind Detection
+
+On macOS, ComboAuth queries the accessibility API for the focused element's
+role before pasting (`FieldKind::{Secure, Editable, NonEditable, Unknown}`).
+The advisory policy, based only on what the focused app reports through AX
+(`paste_decision`), is:
+
+- AX-reported `Secure` → auto-paste without an extra confirmation
+- AX-reported `Editable` / `Unknown` → require explicit confirmation before pasting
+- AX-reported `NonEditable` → refuse auto-paste, offer clipboard-copy instead (usability
+  fallback — clipboard is still an exposure channel, not a secure alternative)
+
+`Secure` here means "the focused app reported a secure text field role via AX"; it does
+not verify app identity, bundle ID, process integrity, domain, or whether the destination
+logs received input.
+
+**What this achieves:** reduces the risk of accidentally pasting a secret
+into a chat window, browser address bar, or other visible text field when the
+user triggers Ctrl+K on the wrong target.
+
+**What this does NOT achieve:** this is not a security boundary. A focused
+app controls its own accessibility attributes and can report any role it
+chooses. A malicious or compromised application can trivially spoof
+`kAXSecureTextFieldSubrole` to make itself look like a password field, or
+report a legitimate role while logging every character received. The AX check
+has no authority over a cooperative adversary.
+
+Do not treat a `Secure` classification as proof that the destination is
+trustworthy. The correct mental model is: AX gating prevents common accidents
+(fat-finger, wrong window), not attacks by a focused app that controls its own
+metadata.
+
 ## README Requirement
 
 The ComboAuth README must state plainly:
