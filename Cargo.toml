@@ -24,7 +24,7 @@ thiserror = "2.0.18"
 zeroize = { version = "1.8", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "sync"] }
 arboard = "3"
-enigo = "0.2"
+enigo = { version = "0.2", default-features = false, features = ["x11rb"] }
 global-hotkey = "0.6"
 tray-icon = "0.19"
 
