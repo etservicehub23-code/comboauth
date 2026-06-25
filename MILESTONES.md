@@ -91,10 +91,10 @@ Split the project into three binaries and implement system-wide Ctrl+K autofill 
 
 ### Phase 9-D: Linux X11
 
-- `global-hotkey` handles X11 Ctrl+K registration; `enigo` handles synthetic paste.
-- `atspi` detects `Role::PasswordText`; return `Unknown` aggressively when D-Bus/AT-SPI unavailable.
-- Socket path: `$XDG_RUNTIME_DIR/comboauth/daemon.sock`.
-- `tray-icon` on Linux requires AppIndicator/GTK at runtime — document this dependency.
+- `global-hotkey` handles X11 Ctrl+K registration; `enigo` handles synthetic paste. <!-- done: paste_and_clear/copy_and_clear in src/paste/linux.rs -->
+- `atspi` detects `Role::PasswordText`; return `Unknown` aggressively when D-Bus/AT-SPI unavailable. <!-- done: src/focus/linux_atspi.rs, BFS walk with aggressive Unknown -->
+- Socket path: `$XDG_RUNTIME_DIR/comboauth/daemon.sock`. <!-- done: src/ipc.rs socket_path() linux branch -->
+- `tray-icon` on Linux requires AppIndicator/GTK at runtime — document this dependency. <!-- done: README.md Linux X11 section, distro table; tray implementation still pending -->
 
 ### Phase 9-E: Linux Wayland Fallback
 

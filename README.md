@@ -37,6 +37,31 @@ Logs go to `/tmp/comboauth-daemon.log` and `/tmp/comboauth-tray.log` (override
 with `COMBOAUTH_LOG_DIR`); binary location defaults to `target/release`
 (override with `COMBOAUTH_BIN_DIR`).
 
+### Global hotkey daemon (Linux X11)
+
+On Linux, `comboauth-daemon` registers Ctrl+K via `global-hotkey` (X11) and
+synthesizes paste via `enigo`. AT-SPI field-kind detection (via D-Bus) is used to classify the focused element before pasting; the daemon
+degrades to `FieldKind::Unknown` if AT-SPI is unavailable.
+
+Socket path: `$XDG_RUNTIME_DIR/comboauth/daemon.sock`.
+
+**Tray runtime dependency:** `comboauth-tray` uses `tray-icon`, which on
+Linux requires `libayatana-appindicator3` (preferred) or the legacy
+`libappindicator3` (GTK 3) at runtime. Install the appropriate package for
+your distribution before running the tray binary:
+
+| Distribution | Package |
+|---|---|
+| Debian / Ubuntu | `libayatana-appindicator3-1` |
+| Fedora / RHEL | `libayatana-appindicator-gtk3` |
+| Arch Linux | `libappindicator` or AUR `libayatana-appindicator` |
+| openSUSE | `libayatana-appindicator3-1` |
+
+If neither library is present the tray binary will panic at startup with:
+`Failed to load ayatana-appindicator3 or appindicator3 dynamic library` (with
+both `libayatana-appindicator3.so.1` and `libappindicator3.so.1` failure
+details). The daemon binary itself runs without the tray and does not require GTK.
+
 ## Test
 
 ```bash
