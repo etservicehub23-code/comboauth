@@ -165,7 +165,7 @@ async fn handle_connection(mut stream: tokio::net::UnixStream, secret_store: Sha
             }
         }
         DaemonRequest::PasteSelected { entry_id } => {
-            let field_kind = comboauth::focus::focused_field_kind();
+            let field_kind = comboauth::focus::focused_field_kind_async().await;
             eprintln!("comboauth-daemon: PasteSelected IPC, focused field = {field_kind:?}");
 
             use comboauth::focus::{PasteDecision, paste_decision};

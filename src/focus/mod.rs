@@ -25,6 +25,15 @@ pub fn focused_field_kind() -> FieldKind {
     FieldKind::Unknown
 }
 
+/// Async variant -- use inside async Tokio tasks (e.g. the IPC handler).
+/// The sync `focused_field_kind()` must only be called from non-async threads.
+pub async fn focused_field_kind_async() -> FieldKind {
+    #[cfg(target_os = "linux")]
+    return linux_atspi::focused_field_kind_async().await;
+    #[allow(unreachable_code)]
+    FieldKind::Unknown
+}
+
 /// What to do about auto-pasting into a field of the given `FieldKind`.
 ///
 /// This reduces *accidental* paste into the wrong field; it is not a
