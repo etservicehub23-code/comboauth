@@ -24,3 +24,12 @@ pub fn copy_and_clear(_secret: &str, _clear_after_ms: u64) -> Result<(), Box<dyn
     #[allow(unreachable_code)]
     Err("unsupported platform".into())
 }
+
+/// Returns `true` when running inside a Wayland session (`WAYLAND_DISPLAY` set).
+/// Always `false` on non-Linux platforms.
+pub fn is_wayland_session() -> bool {
+    #[cfg(target_os = "linux")]
+    return linux::is_wayland_session();
+    #[allow(unreachable_code)]
+    false
+}

@@ -4,10 +4,11 @@
 //! `exclude_from_history()` is set on every clipboard write so that clipboard
 //! managers (e.g. GPaste, Clipman) do not persist the secret.
 //!
-//! On Wayland, enigo's Ctrl+V synthesis may fail — the caller can detect this
-//! and fall back to clipboard-only (`copy_and_clear`). Phase 9-E adds explicit
-//! Wayland detection and desktop notification; until then, we attempt the
-//! keystroke and propagate the error.
+//! On Wayland, enigo's X11 Ctrl+V synthesis is unavailable. `paste_and_clear`
+//! detects Wayland via `is_wayland_session()` and automatically falls back to
+//! `copy_and_clear` so the caller always gets a safe result regardless of
+//! display server. Phase 9-E builds on this to add the ashpd portal path and
+//! desktop notification.
 
 use std::thread;
 use std::time::Duration;
@@ -17,7 +18,33 @@ use arboard::Clipboard;
 use arboard::SetExtLinux as _;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
+/// Returns `true` when the process is running inside a Wayland session.
+///
+/// Checks both `WAYLAND_DISPLAY` (set by compositors when the Wayland socket is
+/// available) and `XDG_SESSION_TYPE=wayland` (set by login managers such as GDM,
+/// SDDM, and systemd-logind). Either signal is sufficient; together they cover
+/// daemon launch environments where one may be absent (e.g. systemd user services
+/// that do not inherit the compositor socket but do get XDG_SESSION_TYPE from the
+/// PAM environment).
+pub fn is_wayland_session() -> bool {
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").map(|v| !v.is_empty()).unwrap_or(false);
+    let xdg_type = std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false);
+    wayland_display || xdg_type
+}
+
 pub fn paste_and_clear(secret: &str, clear_after_ms: u64) -> Result<(), Box<dyn std::error::Error>> {
+    // Wayland: enigo's X11 Ctrl+V synthesis is not available; fall back to
+    // clipboard-only delivery so the user can paste manually.
+    if is_wayland_session() {
+        // Use a longer clear delay than the caller requested: auto-paste callers pass
+        // ~200 ms (just long enough for Ctrl+V to complete), but on Wayland there is
+        // no keystroke — the user must paste manually, which realistically takes several
+        // seconds. 8000 ms matches the existing copy_and_clear usage for Refuse decisions.
+        let manual_clear_ms = clear_after_ms.max(8000);
+        eprintln!("comboauth: Wayland session detected — auto-paste unavailable; secret copied to clipboard (clears in {manual_clear_ms} ms)");
+        return copy_and_clear(secret, manual_clear_ms);
+    }
+
     let mut clipboard = Clipboard::new()?;
     let previous = clipboard.get_text().ok();
 

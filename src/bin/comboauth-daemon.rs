@@ -244,6 +244,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        if comboauth::paste::is_wayland_session() {
+            eprintln!("comboauth-daemon: Wayland session detected — hotkey via ashpd portal (Phase 9-E), auto-paste unavailable");
+        } else {
+            eprintln!("comboauth-daemon: X11 session detected");
+        }
+    }
+
     let secret_store: SharedSecretStore = Arc::new(Mutex::new(build_secret_store()));
 
     spawn_hotkey_listener({
