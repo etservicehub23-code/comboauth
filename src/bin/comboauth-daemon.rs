@@ -13,7 +13,9 @@ use comboauth::ipc::{DaemonRequest, DaemonResponse, socket_path};
 use comboauth::persistence::PersistenceStore;
 use comboauth::service::ServiceId;
 use comboauth::vault::SecretStore;
+#[cfg(not(target_os = "linux"))]
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
+#[cfg(not(target_os = "linux"))]
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
@@ -90,31 +92,41 @@ fn build_persistence_store() -> Box<dyn PersistenceStore + Send + Sync> {
     Box::new(comboauth::persistence::MockPersistenceStore::default())
 }
 
-/// Registers the global Ctrl+K hotkey and spawns a blocking thread that
-/// forwards trigger events into the async world via `on_trigger`.
+/// Registers the global Ctrl+K hotkey and spawns a background listener that
+/// calls `on_trigger` on each press.
+///
+/// On Linux: dispatches to the platform hotkey module — X11 uses global-hotkey,
+/// Wayland tries the ashpd GlobalShortcuts portal (see `comboauth::hotkey::linux`).
+/// On other platforms: uses global-hotkey directly.
 fn spawn_hotkey_listener(on_trigger: impl Fn() + Send + 'static) -> Result<(), Box<dyn std::error::Error>> {
-    let manager = GlobalHotKeyManager::new()?;
-    let hotkey = HotKey::new(Some(Modifiers::CONTROL), Code::KeyK);
-    manager.register(hotkey)?;
-    // Keep the manager alive for the life of the process — dropping it
-    // unregisters the hotkey.
-    std::mem::forget(manager);
+    #[cfg(target_os = "linux")]
+    return comboauth::hotkey::linux::spawn_listener(on_trigger);
 
-    std::thread::spawn(move || {
-        let receiver = GlobalHotKeyEvent::receiver();
-        loop {
-            if let Ok(event) = receiver.recv() {
-                // global-hotkey emits both a Pressed and a Released event per
-                // keypress with the same id. Only react to Pressed, otherwise
-                // the queued Released event fires on_trigger() a second time
-                // as soon as the first (blocking) picker session returns.
-                if event.id() == hotkey.id() && event.state == HotKeyState::Pressed {
-                    on_trigger();
+    #[cfg(not(target_os = "linux"))]
+    {
+        let manager = GlobalHotKeyManager::new()?;
+        let hotkey = HotKey::new(Some(Modifiers::CONTROL), Code::KeyK);
+        manager.register(hotkey)?;
+        // Keep the manager alive for the life of the process — dropping it
+        // unregisters the hotkey.
+        std::mem::forget(manager);
+
+        std::thread::spawn(move || {
+            let receiver = GlobalHotKeyEvent::receiver();
+            loop {
+                if let Ok(event) = receiver.recv() {
+                    // global-hotkey emits both a Pressed and a Released event per
+                    // keypress with the same id. Only react to Pressed, otherwise
+                    // the queued Released event fires on_trigger() a second time
+                    // as soon as the first (blocking) picker session returns.
+                    if event.id() == hotkey.id() && event.state == HotKeyState::Pressed {
+                        on_trigger();
+                    }
                 }
             }
-        }
-    });
-    Ok(())
+        });
+        Ok(())
+    }
 }
 
 fn on_hotkey_triggered(secret_store: SharedSecretStore) {
@@ -247,7 +259,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     {
         if comboauth::paste::is_wayland_session() {
-            eprintln!("comboauth-daemon: Wayland session detected — hotkey via ashpd portal (Phase 9-E), auto-paste unavailable");
+            eprintln!("comboauth-daemon: Wayland session detected — registering Ctrl+K via ashpd GlobalShortcuts portal; auto-paste unavailable");
         } else {
             eprintln!("comboauth-daemon: X11 session detected");
         }

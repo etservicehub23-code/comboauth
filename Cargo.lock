@@ -544,6 +544,7 @@ version = "0.1.0"
 dependencies = [
  "accessibility-sys",
  "arboard",
+ "ashpd",
  "atspi",
  "block2 0.6.2",
  "core-foundation",
@@ -552,6 +553,7 @@ dependencies = [
  "crossterm",
  "dispatch2",
  "enigo",
+ "futures-util",
  "global-hotkey",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",

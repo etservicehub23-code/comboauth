@@ -31,6 +31,8 @@ tray-icon = "0.19"
 [target.'cfg(target_os = "linux")'.dependencies]
 oo7 = { version = "0.6", features = ["tokio", "native_crypto"] }
 atspi = { version = "0.25", features = ["connection", "proxies", "zbus"] }
+ashpd = { version = "0.13", features = ["global_shortcuts"] }
+futures-util = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "2", optional = true }
