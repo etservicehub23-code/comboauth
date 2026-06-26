@@ -1,18 +1,13 @@
-//! comboauth-tray — macOS menu bar launcher/controller for comboauth-daemon.
+//! comboauth-tray — menu bar / system tray launcher/controller for comboauth-daemon.
 //!
-//! Linux tray (AppIndicator/GTK) is Phase 9-D — this binary currently only
-//! implements the macOS menu bar.
+//! macOS: native NSStatusItem menu bar via tray-icon + objc2.
+//! Linux: AppIndicator/GTK system tray via tray-icon + libappindicator3 (runtime dep).
 
-#[cfg(target_os = "macos")]
 use comboauth::ipc::{DaemonRequest, DaemonResponse, send_request};
 
-/// Menu bar icon: a keycap with a keyhole notch, baked from
-/// `assets/tray-icon.svg` into `assets/tray-icon.png` (22x22, black on
-/// transparent). Decoded at startup and loaded as a "template" image so
-/// macOS recolors it automatically for light/dark menu bars — only the
-/// alpha channel matters for a template image, so solid black is correct
-/// regardless of appearance.
-#[cfg(target_os = "macos")]
+/// Tray icon decoded from assets/tray-icon.png (22×22 RGBA).
+/// On macOS the icon is loaded as a template image (alpha-only matters).
+/// On Linux it appears as-is via AppIndicator.
 fn build_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
     const ICON_PNG: &[u8] = include_bytes!("../../assets/tray-icon.png");
 
@@ -28,8 +23,13 @@ fn build_icon() -> Result<tray_icon::Icon, Box<dyn std::error::Error>> {
     Ok(tray_icon::Icon::from_rgba(rgba, info.width, info.height)?)
 }
 
-#[cfg(target_os = "macos")]
-fn handle_menu_event(id: &tray_icon::menu::MenuId, open_id: &tray_icon::menu::MenuId, status_id: &tray_icon::menu::MenuId, stop_id: &tray_icon::menu::MenuId, quit_id: &tray_icon::menu::MenuId) {
+fn handle_menu_event(
+    id: &tray_icon::menu::MenuId,
+    open_id: &tray_icon::menu::MenuId,
+    status_id: &tray_icon::menu::MenuId,
+    stop_id: &tray_icon::menu::MenuId,
+    quit_id: &tray_icon::menu::MenuId,
+) {
     if id == open_id {
         match send_request(&DaemonRequest::ShowTui) {
             Ok(DaemonResponse::Ok) => eprintln!("comboauth-tray: launched TUI"),
@@ -100,14 +100,68 @@ fn run_macos_tray() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Linux AppIndicator tray via tray-icon + libappindicator3.
+/// Requires libayatana-appindicator3-1 or libappindicator3-1 at runtime
+/// and a running GTK-compatible desktop environment (X11 or XWayland).
+#[cfg(target_os = "linux")]
+fn run_linux_tray() -> Result<(), Box<dyn std::error::Error>> {
+    use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+    use tray_icon::TrayIconBuilder;
+
+    gtk::init().map_err(|e| format!("GTK init failed: {e}"))?;
+
+    let menu = Menu::new();
+    let open_item = MenuItem::new("Open ComboAuth", true, None);
+    let status_item = MenuItem::new("Status", true, None);
+    let stop_item = MenuItem::new("Stop Daemon", true, None);
+    let quit_item = MenuItem::new("Quit", true, None);
+    menu.append_items(&[&open_item, &status_item, &stop_item, &quit_item])?;
+
+    let open_id = open_item.id().clone();
+    let status_id = status_item.id().clone();
+    let stop_id = stop_item.id().clone();
+    let quit_id = quit_item.id().clone();
+
+    let _tray = TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_icon(build_icon()?)
+        .with_tooltip("ComboAuth")
+        .build()?;
+
+    // Handle menu events on a background thread so blocking IPC doesn't stall GTK.
+    // Quit is special: gtk::main_quit() must run on the GTK-initialized main thread,
+    // so we marshal it via glib::MainContext::invoke() and break the receiver loop.
+    let quit_id_clone = quit_id.clone();
+    std::thread::spawn(move || {
+        let receiver = MenuEvent::receiver();
+        loop {
+            if let Ok(event) = receiver.recv() {
+                if event.id() == &quit_id_clone {
+                    eprintln!("comboauth-tray: quitting");
+                    gtk::glib::MainContext::default().invoke(|| gtk::main_quit());
+                    break;
+                }
+                handle_menu_event(event.id(), &open_id, &status_id, &stop_id, &quit_id);
+            }
+        }
+    });
+
+    gtk::main();
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     {
         run_macos_tray()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
-        eprintln!("comboauth-tray: Linux tray not yet implemented (Phase 9-D)");
+        run_linux_tray()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        eprintln!("comboauth-tray: unsupported platform");
         Ok(())
     }
 }

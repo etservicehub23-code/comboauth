@@ -26,13 +26,15 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macro
 arboard = "3"
 enigo = { version = "0.2", default-features = false, features = ["x11rb"] }
 global-hotkey = "0.6"
-tray-icon = "0.19"
+tray-icon = { version = "0.19", default-features = false }
+png = "0.17"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 oo7 = { version = "0.6", features = ["tokio", "native_crypto"] }
 atspi = { version = "0.25", features = ["connection", "proxies", "zbus"] }
 ashpd = { version = "0.13", features = ["global_shortcuts"] }
 futures-util = "0.3"
+gtk = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = { version = "2", optional = true }
@@ -49,7 +51,6 @@ objc2-app-kit = { version = "0.3", features = [
 objc2-foundation = "0.3"
 block2 = "0.6"
 dispatch2 = "0.3"
-png = "0.17"
 
 [features]
 macos-keychain = ["security-framework"]
