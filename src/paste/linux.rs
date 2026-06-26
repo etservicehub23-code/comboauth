@@ -5,11 +5,11 @@
 //! managers (e.g. GPaste, Clipman) do not persist the secret.
 //!
 //! On Wayland, enigo's X11 Ctrl+V synthesis is unavailable. `paste_and_clear`
-//! detects Wayland via `is_wayland_session()` and automatically falls back to
-//! `copy_and_clear` so the caller always gets a safe result regardless of
-//! display server. Phase 9-E builds on this to add the ashpd portal path and
-//! desktop notification.
+//! detects Wayland via `is_wayland_session()` and falls back to `copy_and_clear`
+//! plus a desktop notification ("Secret copied — paste manually") so the user
+//! knows to Ctrl+V themselves.
 
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -32,6 +32,24 @@ pub fn is_wayland_session() -> bool {
     wayland_display || xdg_type
 }
 
+/// Send a desktop notification via `notify-send`. Fire-and-forget; silently
+/// ignored when `notify-send` is not installed or the notification daemon is
+/// absent (headless / server environments).
+fn notify_desktop(summary: &str, body: &str) {
+    let summary = summary.to_owned();
+    let body = body.to_owned();
+    thread::spawn(move || {
+        // Wait on the child (via status()) so it is reaped before the thread
+        // exits — bare spawn() + drop would leave a zombie while the daemon lives.
+        let _ = Command::new("notify-send")
+            .args(["--urgency=normal", "--expire-time=5000", &summary, &body])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    });
+}
+
 pub fn paste_and_clear(secret: &str, clear_after_ms: u64) -> Result<(), Box<dyn std::error::Error>> {
     // Wayland: enigo's X11 Ctrl+V synthesis is not available; fall back to
     // clipboard-only delivery so the user can paste manually.
@@ -42,6 +60,9 @@ pub fn paste_and_clear(secret: &str, clear_after_ms: u64) -> Result<(), Box<dyn 
         // seconds. 8000 ms matches the existing copy_and_clear usage for Refuse decisions.
         let manual_clear_ms = clear_after_ms.max(8000);
         eprintln!("comboauth: Wayland session detected — auto-paste unavailable; secret copied to clipboard (clears in {manual_clear_ms} ms)");
+        // Notify before blocking in copy_and_clear so the user sees the prompt
+        // immediately after the hotkey fires, not after 8 s.
+        notify_desktop("ComboAuth", "Secret copied — paste manually");
         return copy_and_clear(secret, manual_clear_ms);
     }
 

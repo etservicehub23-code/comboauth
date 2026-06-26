@@ -100,7 +100,7 @@ Split the project into three binaries and implement system-wide Ctrl+K autofill 
 
 - Detect Wayland session (`WAYLAND_DISPLAY` env var). <!-- done: is_wayland_session() in src/paste/linux.rs checks WAYLAND_DISPLAY || XDG_SESSION_TYPE=wayland; paste_and_clear auto-falls back to copy_and_clear with 8 s clear delay on Wayland; daemon logs session type at startup -->
 - Use `ashpd` global shortcuts portal where supported; degrade otherwise. <!-- done: src/hotkey/linux.rs spawn_listener/spawn_wayland_listener; ashpd 0.13 GlobalShortcuts portal with preferred_trigger <Control>k; degrades with warning on portal unavailability -->
-- Fallback: copy secret to clipboard, send desktop notification ("Secret copied — paste manually").
+- Fallback: copy secret to clipboard, send desktop notification ("Secret copied — paste manually"). <!-- done: notify_desktop() in src/paste/linux.rs spawns notify-send (Stdio::null, status-waited) before copy_and_clear -->
 - Document Wayland limitations clearly in README.
 
 ### Security Constraints
