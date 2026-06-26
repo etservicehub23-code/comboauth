@@ -62,6 +62,46 @@ If neither library is present the tray binary will panic at startup with:
 both `libayatana-appindicator3.so.1` and `libappindicator3.so.1` failure
 details). The daemon binary itself runs without the tray and does not require GTK.
 
+### Wayland limitations
+
+ComboAuth detects a Wayland session via `WAYLAND_DISPLAY` or
+`XDG_SESSION_TYPE=wayland`. Several capabilities are unavailable or degraded
+on Wayland due to compositor sandbox restrictions:
+
+| Feature | X11 | Wayland |
+|---|---|---|
+| Global Ctrl+K hotkey registration | `global-hotkey` (XGrabKey) | XDG GlobalShortcuts portal (`ashpd`) — user must approve in compositor settings; degrades gracefully if portal is absent or denied |
+| Auto-paste (Ctrl+V synthesis) | `enigo` (XTest) | **Not available** — `enigo` requires an X server for keystroke synthesis |
+| Clipboard-only paste path | — | Secret copied to clipboard; desktop notification sent via `notify-send` ("Secret copied — paste manually"); clipboard cleared after 8 s |
+| AT-SPI field-kind detection | Best effort; returns `Unknown` on D-Bus errors, timeouts, or unrecognized roles | Same best-effort path — no additional Wayland restriction |
+
+**Current Linux status:** The Linux floating picker (Phase 9-D) is not yet
+implemented. When Ctrl+K fires on Linux, the daemon logs
+`picker not yet implemented on this platform` and takes no paste action.
+The hotkey registration and paste infrastructure below is in place for when
+the picker is wired up.
+
+**Hotkey registration:** On Wayland the daemon attempts to register Ctrl+K via
+the XDG GlobalShortcuts portal (`org.freedesktop.portal.GlobalShortcuts`),
+supported on KDE Plasma 5.27+, GNOME 46+ (with the portal extension), and
+others. If the portal is unavailable or the permission is denied, Ctrl+K is
+not registered and the daemon logs a warning. The daemon does **not** crash;
+it continues running and serving IPC requests normally.
+
+**Paste path when called on Wayland:** `paste_and_clear()` detects a Wayland
+session and falls back to clipboard-only: it copies the secret, fires a
+desktop notification, and schedules clipboard clear after 8 seconds. You then
+paste manually with Ctrl+V. Synthetic Ctrl+V via `enigo` is not available on
+Wayland — it requires an X server.
+
+**Clipboard clear timing:** The Wayland clipboard fallback clears after 8 s
+(long enough to paste manually). The X11 auto-paste path clears much sooner
+(~200 ms, just after synthetic Ctrl+V). The TUI clipboard path uses 10 s.
+
+**`notify-send` dependency:** Desktop notifications on the Wayland fallback
+path require `notify-send` (typically from `libnotify-bin` / `libnotify`).
+If it is absent the paste still works — the notification is silently skipped.
+
 ## Test
 
 ```bash
